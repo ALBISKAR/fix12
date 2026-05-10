@@ -915,44 +915,58 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _processDailyReward(String uid, int rewardAmount) async {
+Future<void> _processDailyReward(String uid, int rewardAmount) async {
     try {
-      // 1. تسجيل الطلب في مجموعة reward_requests للمراجعة
-      await FirebaseFirestore.instance.collection('reward_requests').add({
+      // إنشاء مرجع للعملية لضمان كتابة الوقت بشكل متناسق
+      final now = DateTime.now(); 
+
+      // استخدام WriteBatch لضمان تنفيذ العمليتين معاً أو فشلهما معاً
+      WriteBatch batch = FirebaseFirestore.instance.batch();
+
+      // 1. تسجيل الطلب في مجموعة reward_requests
+      DocumentReference requestRef = FirebaseFirestore.instance.collection('reward_requests').doc();
+      batch.set(requestRef, {
         'userId': uid,
         'timestamp': FieldValue.serverTimestamp(),
         'amount': rewardAmount,
       });
 
-      // 2. تحديث رصيد المستخدم وإضافة العملية لسجل النقاط (Points History)
-      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+      // 2. تحديث بيانات المستخدم
+      DocumentReference userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+      batch.update(userRef, {
         'points': FieldValue.increment(rewardAmount),
         'last_daily_claim': FieldValue.serverTimestamp(),
         'points_history': FieldValue.arrayUnion([
           {
-            'type': 'daily_reward_claim', // المفتاح المترجم[cite: 1]
+            'type': 'daily_reward_claim',
             'amount': rewardAmount,
-            'timestamp': FieldValue.serverTimestamp(),
+            // نستخدم وقت الجهاز المحلي هنا لتجنب تعارض الـ serverTimestamp داخل المصفوفة
+            'timestamp': now.toIso8601String(), 
           }
         ])
       });
 
+      // تنفيذ الـ Batch
+      await batch.commit();
+
       if (!mounted) return;
 
-      // رسالة نجاح مترجمة
+      // إظهار رسالة النجاح
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(tr('reward_processing_msg')),
-          backgroundColor: Colors.blueAccent,
+          backgroundColor: Colors.green, // غيرته للأخضر ليدل على النجاح
           behavior: SnackBarBehavior.floating,
         ),
       );
+
     } catch (e) {
       debugPrint("❌ Daily Reward Error: $e");
+      // التحقق مما إذا كان الخطأ حقيقياً أم مجرد تأخير
+      if (!mounted) return;
       _showErrorSnackBar(tr('withdraw_error'));
     }
   }
-
   // --- 8. بناء الواجهة الرئيسية (Build) ---
 // --- 8. بناء الواجهة الرئيسية (Build) ---
   @override
