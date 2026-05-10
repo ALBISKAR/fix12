@@ -915,7 +915,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-Future<void> _processDailyReward(String uid, int rewardAmount) async {
+  Future<void> _processDailyReward(String uid, int rewardAmount) async {
     try {
       // استخدام الوقت المحلي للسجل لتجنب تعارض serverTimestamp داخل المصفوفات
       final now = DateTime.now();
@@ -924,7 +924,8 @@ Future<void> _processDailyReward(String uid, int rewardAmount) async {
       WriteBatch batch = FirebaseFirestore.instance.batch();
 
       // 1. مرجع طلب المكافأة
-      DocumentReference requestRef = FirebaseFirestore.instance.collection('reward_requests').doc();
+      DocumentReference requestRef =
+          FirebaseFirestore.instance.collection('reward_requests').doc();
       batch.set(requestRef, {
         'userId': uid,
         'timestamp': FieldValue.serverTimestamp(),
@@ -932,7 +933,8 @@ Future<void> _processDailyReward(String uid, int rewardAmount) async {
       });
 
       // 2. مرجع المستخدم وتحديث البيانات
-      DocumentReference userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+      DocumentReference userRef =
+          FirebaseFirestore.instance.collection('users').doc(uid);
       batch.update(userRef, {
         'points': FieldValue.increment(rewardAmount),
         'last_daily_claim': FieldValue.serverTimestamp(),
@@ -958,13 +960,13 @@ Future<void> _processDailyReward(String uid, int rewardAmount) async {
           behavior: SnackBarBehavior.floating,
         ),
       );
-
     } catch (e) {
       debugPrint("❌ Daily Reward Error: $e");
       if (!mounted) return;
       _showErrorSnackBar(tr('withdraw_error'));
     }
   }
+
   // --- 8. بناء الواجهة الرئيسية (Build) ---
 // --- 8. بناء الواجهة الرئيسية (Build) ---
   @override
@@ -1028,31 +1030,35 @@ Future<void> _processDailyReward(String uid, int rewardAmount) async {
             final List<dynamic> history = userData['points_history'] ?? [];
 
 // 1. تعريف الوقت الحالي أولاً
-final DateTime now = DateTime.now();
+            final DateTime now = DateTime.now();
 
 // 2. حساب إعلانات Unity اليوم
-int unityWatched = history.where((item) {
-  final rawTimestamp = item['timestamp'];
-  if (rawTimestamp == null || item['type'] != 'unity_ad') return false;
+            int unityWatched = history.where((item) {
+              final rawTimestamp = item['timestamp'];
+              if (rawTimestamp == null || item['type'] != 'unity_ad') {
+                return false;
+              }
 
-  final DateTime timestamp = (rawTimestamp as Timestamp).toDate();
-  
-  return timestamp.year == now.year && 
-         timestamp.month == now.month && 
-         timestamp.day == now.day;
-}).length;
+              final DateTime timestamp = (rawTimestamp as Timestamp).toDate();
+
+              return timestamp.year == now.year &&
+                  timestamp.month == now.month &&
+                  timestamp.day == now.day;
+            }).length;
 
 // 3. حساب إعلانات AdMob اليوم
-int admobWatched = history.where((item) {
-  final rawTimestamp = item['timestamp'];
-  if (rawTimestamp == null || item['type'] != 'admob_ad') return false;
+            int admobWatched = history.where((item) {
+              final rawTimestamp = item['timestamp'];
+              if (rawTimestamp == null || item['type'] != 'admob_ad') {
+                return false;
+              }
 
-  final DateTime timestamp = (rawTimestamp as Timestamp).toDate();
-  
-  return timestamp.year == now.year && 
-         timestamp.month == now.month && 
-         timestamp.day == now.day;
-}).length;
+              final DateTime timestamp = (rawTimestamp as Timestamp).toDate();
+
+              return timestamp.year == now.year &&
+                  timestamp.month == now.month &&
+                  timestamp.day == now.day;
+            }).length;
 
             int unityRemaining =
                 (unityDailyLimit - unityWatched).clamp(0, unityDailyLimit);
