@@ -346,16 +346,12 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         }
 
-// 5. نظام الإحالة وإنشاء الحساب (النسخة المصلحة نهائياً)
         String myCode = user.uid.substring(0, 6).toUpperCase();
         String enteredCode = _referralController.text.trim().toUpperCase();
-
-// التغيير هنا: نتحقق من عدم وجود الوثيقة "أو" أن المستخدم جديد
         bool userNotFound = !docSnapshot.exists;
 
         if (userNotFound) {
           String referredByCode = "";
-
           if (enteredCode.isNotEmpty && enteredCode != myCode) {
             final friendQuery = await FirebaseFirestore.instance
                 .collection('users')
@@ -368,7 +364,6 @@ class _LoginScreenState extends State<LoginScreen> {
             }
           }
 
-          // استخدام await لضمان اكتمال الكتابة قبل الانتقال
           await userDocRef.set({
             'name': user.displayName,
             'email': user.email,
@@ -380,26 +375,37 @@ class _LoginScreenState extends State<LoginScreen> {
             'createdAt': FieldValue.serverTimestamp(),
             'last_login': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
-
           debugPrint("✅ تم إنشاء حساب جديد بنجاح");
         } else {
-          // تحديث وقت الدخول للمستخدم القديم
           await userDocRef.update({
             'last_login': FieldValue.serverTimestamp(),
           });
           debugPrint("✅ تم تحديث دخول مستخدم سابق");
         }
 
-// 6. الدخول للشاشة الرئيسية (تأكد من إغلاق حالة التحميل أولاً)
+// 6. 🚀 إظهار الإعلان والانتقال للشاشة الرئيسية
         if (mounted) {
-          setState(
-              () => _isLoading = false); // 👈 ضروري لمنع ظهور خطأ في الخلفية
-          Navigator.pushReplacementNamed(context, '/home');
+          // أ- إيقاف مؤشر التحميل أولاً لتفريغ الشاشة
+          setState(() => _isLoading = false);
+
+          // ب- طلب تحميل إعلان جديد ليكون جاهزاً (اختياري لضمان التحديث)
+          AdManager.loadAppOpenAd();
+
+          // ج- عرض الإعلان فوراً
+          AdManager.showAppOpenAd();
+
+          // د- تأخير بسيط جداً لضمان أن الإعلان بدأ بالظهور قبل تغيير الشاشة في الخلفية
+          await Future.delayed(const Duration(milliseconds: 300));
+
+          if (mounted) {
+            Navigator.pushReplacementNamed(context, '/home');
+          }
         }
       }
     } catch (e) {
       debugPrint("Login Error: $e");
-      _showSnack(tr('withdraw_error'));
+      _showSnack(tr(
+          'login_error')); // تأكد من وجود هذا المفتاح أو استبدله بـ withdraw_error
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

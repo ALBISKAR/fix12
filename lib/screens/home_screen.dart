@@ -103,13 +103,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    Future.delayed(Duration(seconds: 1), () {
+      AdManager.showAppOpenAd();
+    });
     _startNetworkMonitoring();
     _startBanListener();
     _loadUserData();
-    //WidgetsBinding.instance.addPostFrameCallback((_) {
-    // AdManager.connectTapjoy();
-    // });
-    // 🔄 مزامنة العدادات من السيرفر فور الدخول
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _syncCooldownFromFirebase(user.uid);
@@ -143,7 +142,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         AdManager.initialize();
         AdManager.showAppOpenAd();
 
-// استبدل الجزء الخاص بـ BannerAd بهذا الكود المطور
         _adMobBanner = BannerAd(
           adUnitId: AdManager.adMobBannerId,
           size: AdSize.banner,
