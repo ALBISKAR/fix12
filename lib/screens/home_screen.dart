@@ -17,6 +17,7 @@ import 'package:check_vpn_connection/check_vpn_connection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart'; // 👈 أضف هذا السطر في الأعلى
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:ntp/ntp.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -877,6 +878,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
+      // 1. جلب وقت الإنترنت الحقيقي (لا يمكن الغش فيه)
+      DateTime now = await NTP.now();
+
       final doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
@@ -900,12 +904,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           } else if (rawDate is String) {
             lastClaimDate = DateTime.parse(rawDate);
           } else {
-            lastClaimDate = DateTime.now().subtract(const Duration(days: 2));
+            // في حال وجود بيانات غريبة، نفترض أنه مضى وقت طويل
+            lastClaimDate = now.subtract(const Duration(days: 2));
           }
 
           DateTime nextClaimDate = lastClaimDate.add(const Duration(hours: 24));
-          DateTime now = DateTime.now();
 
+          // 2. المقارنة مع وقت الإنترنت وليس وقت الهاتف
           if (now.isBefore(nextClaimDate)) {
             canClaim = false;
             remainingTime = nextClaimDate.difference(now);
@@ -914,57 +919,63 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
 
       if (mounted) {
-        // نمرر المعاملات لـ Dialog الذي سيستدعي _processDailyReward لاحقاً
         _showRewardDialog(user.uid, currentStreak, canClaim, remainingTime);
       }
     } catch (e) {
       debugPrint("❌ Error in Daily Reward: $e");
-      _showErrorSnackBar("فشل جلب البيانات، حاول مجدداً");
+      // في حال فشل جلب وقت الإنترنت (مثلاً لا يوجد اتصال)، نمنع الاستلام للحماية
+      _showErrorSnackBar("تأكد من اتصالك بالإنترنت للمطالبة بالجائزة");
     }
   }
 
   Future<void> _processDailyReward(String uid, int rewardAmount) async {
     try {
-      // استخدام الوقت المحلي للسجل لتجنب تعارض serverTimestamp داخل المصفوفات
-      final now = DateTime.now();
+      // 1. جلب الوقت الحقيقي من الإنترنت لضمان دقة سجل التاريخ
+      // ملاحظة: تأكد من تمرير الوقت من الدالة السابقة أو جلبه هنا مجدداً باستخدام NTP
+      DateTime realNow = await NTP.now();
 
       // إنشاء Batch لضمان تنفيذ العمليات معاً
       WriteBatch batch = FirebaseFirestore.instance.batch();
 
-      // 1. مرجع طلب المكافأة
+      // 1. مرجع طلب المكافأة (التوثيق)
       DocumentReference requestRef =
           FirebaseFirestore.instance.collection('reward_requests').doc();
       batch.set(requestRef, {
         'userId': uid,
-        'timestamp': FieldValue.serverTimestamp(),
+        'timestamp': FieldValue.serverTimestamp(), // وقت السيرفر الفعلي
         'amount': rewardAmount,
       });
 
-      // 2. مرجع المستخدم وتحديث البيانات
+      // 2. تحديث بيانات المستخدم
       DocumentReference userRef =
           FirebaseFirestore.instance.collection('users').doc(uid);
+
       batch.update(userRef, {
         'points': FieldValue.increment(rewardAmount),
-        'last_daily_claim': FieldValue.serverTimestamp(),
+        'last_daily_claim':
+            FieldValue.serverTimestamp(), // هذا هو الأهم لمنع التلاعب
         'points_history': FieldValue.arrayUnion([
           {
             'type': 'daily_reward_claim',
             'amount': rewardAmount,
-            'timestamp': now.toIso8601String(), // استخدام صيغة وقت ثابتة
+            'timestamp':
+                realNow.toIso8601String(), // استخدام وقت الإنترنت الحقيقي
           }
         ])
       });
 
-      // تنفيذ كل العمليات دفعة واحدة
+      // تنفيذ العمليات
       await batch.commit();
 
       if (!mounted) return;
 
-      // إظهار رسالة نجاح واضحة
+      // رد فعل المستخدم (Vibration) لزيادة الشعور بالجائزة
+      HapticFeedback.mediumImpact();
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(tr('reward_processing_msg')),
-          backgroundColor: Colors.green, // اللون الأخضر يطمن المستخدم
+          backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
         ),
       );

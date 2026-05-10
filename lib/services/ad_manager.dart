@@ -20,6 +20,7 @@ class AdManager {
   static bool _isUnityReady = false;
   static int _clickCounter = 0;
   static const int _adThreshold = 5;
+  static DateTime? _appOpenLoadTime;
 
   static bool get _isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
@@ -58,10 +59,11 @@ class AdManager {
     );
   }
 
-static void showSmartAd() {
+  static void showSmartAd() {
     _clickCounter++; // زيادة العداد مع كل استدعاء
-    
-    debugPrint("Ad Click Counter: $_clickCounter"); // لمراقبة العداد في الـ Console
+
+    debugPrint(
+        "Ad Click Counter: $_clickCounter"); // لمراقبة العداد في الـ Console
 
     if (_clickCounter >= _adThreshold) {
       if (_interstitialAd != null) {
@@ -71,7 +73,7 @@ static void showSmartAd() {
         showAdMobInterstitial(); // تحميل إعلان جديد للمرة القادمة
       } else {
         // إذا وصل لـ 7 نقرات والإعلان ليس جاهزاً بعد
-        _clickCounter = 0; 
+        _clickCounter = 0;
         showAdMobInterstitial();
       }
     }
@@ -159,8 +161,11 @@ static void showSmartAd() {
   }
 
   static Future<void> showTapjoyOfferwall() async {}
+
   static void loadAppOpenAd() {
-    if (_isAdmin || _isAppOpenAdLoading) return;
+    // منع التحميل إذا كان أدمن، أو قيد التحميل، أو الإعلان موجود وصالح
+    if (_isAdmin || _isAppOpenAdLoading || isAppOpenAdAvailable) return;
+
     _isAppOpenAdLoading = true;
     AppOpenAd.load(
       adUnitId: appOpenAdId,
@@ -168,25 +173,51 @@ static void showSmartAd() {
       adLoadCallback: AppOpenAdLoadCallback(
         onAdLoaded: (ad) {
           _appOpenAd = ad;
+          _appOpenLoadTime = DateTime.now(); // تسجيل وقت التحميل
           _isAppOpenAdLoading = false;
+          debugPrint('✅ AppOpenAd Loaded');
         },
-        onAdFailedToLoad: (error) => _isAppOpenAdLoading = false,
+        onAdFailedToLoad: (error) {
+          _isAppOpenAdLoading = false;
+          _appOpenAd = null;
+          debugPrint('❌ AppOpenAd Failed to Load: $error');
+        },
       ),
     );
   }
 
+// دالة فحص صلاحية الإعلان (إعلانات الفتح صالحة لـ 4 ساعات فقط)
+  static bool get isAppOpenAdAvailable {
+    if (_appOpenAd == null || _appOpenLoadTime == null) return false;
+    return DateTime.now().difference(_appOpenLoadTime!).inHours < 4;
+  }
+
   static void showAppOpenAd() {
-    if (_isAdmin || _appOpenAd == null) {
+    // إذا لم يكن الإعلان متاحاً، ابدأ بالتحميل وخرج
+    if (_isAdmin || !isAppOpenAdAvailable) {
+      debugPrint('⚠️ AppOpenAd not available, loading...');
       loadAppOpenAd();
       return;
     }
+
     _appOpenAd!.fullScreenContentCallback = FullScreenContentCallback(
-      onAdDismissedFullScreenContent: (ad) {
+      onAdShowedFullScreenContent: (ad) {
+        debugPrint('📱 AppOpenAd showing');
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        debugPrint('❌ AppOpenAd failed to show: $error');
         ad.dispose();
         _appOpenAd = null;
         loadAppOpenAd();
       },
+      onAdDismissedFullScreenContent: (ad) {
+        debugPrint('✅ AppOpenAd dismissed');
+        ad.dispose();
+        _appOpenAd = null;
+        loadAppOpenAd(); // تحميل الإعلان القادم فوراً
+      },
     );
+
     _appOpenAd!.show();
   }
 
