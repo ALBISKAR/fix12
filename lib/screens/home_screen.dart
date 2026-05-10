@@ -1073,6 +1073,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             return FadeTransition(
               opacity: _animation,
               child: Scaffold(
+                drawer: _buildAppDrawer(context),
                 body: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -1399,50 +1400,91 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-// home_screen.dart
-
   Widget _buildHeader(String? uid, int exchangeRate) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-
-    // حساب القيمة الدولارية
     double rate = exchangeRate > 0 ? exchangeRate.toDouble() : 1000.0;
     double dollarValue = totalPoints / rate;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 15),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // --- القسم الأيمن: زر القائمة + اسم التطبيق ---
           Row(
             children: [
-              // زر الـ 3 شخطات (المسؤول عن فتح الـ Drawer)
               Builder(
                 builder: (context) => IconButton(
-                  icon: const Icon(Icons.menu_rounded, size: 28),
+                  icon: const Icon(Icons.menu_rounded, size: 34),
                   color:
                       themeProvider.isDarkMode ? Colors.amber : Colors.black87,
                   onPressed: () => Scaffold.of(context).openDrawer(),
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 2),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    "Syria Earn",
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.5,
-                      color: themeProvider.isDarkMode
-                          ? Colors.white
-                          : Colors.black87,
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        "Syria Earn",
+                        style: TextStyle(
+                          fontSize: 25,
+                          fontWeight: FontWeight.w900,
+                          color: themeProvider.isDarkMode
+                              ? Colors.white
+                              : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+
+                      // 🌐 زر اللغة
+                      _buildSmallActionIcon(
+                        icon: Icons.language,
+                        color: themeProvider.isDarkMode
+                            ? Colors.amber.withValues(alpha: 0.9)
+                            : Colors.black54,
+                        onPressed: () {/* كود تغيير اللغة */},
+                        isPopup: true,
+                      ),
+
+                      const SizedBox(width: 10),
+
+                      // 🎁 زر المكافأة اليومية مع النقطة الحمراء
+                      GestureDetector(
+                        onTap: _claimDailyReward,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            const Icon(
+                              Icons.card_giftcard_rounded,
+                              size: 28, // حجم أكبر لجذب الانتباه
+                              color: Colors.pinkAccent,
+                            ),
+                            // النقطة الحمراء للتنبيه
+                            Positioned(
+                              right: -2,
+                              top: -2,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                ),
+                                constraints: const BoxConstraints(
+                                  minWidth: 10,
+                                  minHeight: 10,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                   Container(
-                    height: 3,
-                    width: 30,
+                    height: 4,
+                    width: 60,
                     decoration: BoxDecoration(
                       color: Colors.amber,
                       borderRadius: BorderRadius.circular(2),
@@ -1453,45 +1495,41 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
 
-          // --- القسم الأيسر: بطاقة النقاط ---
+          // بطاقة النقاط
           InkWell(
             onTap: () => _navigateToWithdraw(uid),
             borderRadius: BorderRadius.circular(15),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.amber.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                border: Border.all(
+                    color: Colors.amber.withValues(alpha: 0.3), width: 1.5),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.stars_rounded,
-                      color: Colors.amber, size: 20),
+                  // 👛 تم تغيير الأيقونة هنا إلى المحفظة
+                  const Icon(
+                    Icons.account_balance_wallet_rounded,
+                    color: Colors.amber,
+                    size: 22,
+                  ),
                   const SizedBox(width: 8),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        "$totalPoints",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                          color: Colors.amber,
-                        ),
-                      ),
-                      Text(
-                        "\$${dollarValue.toStringAsFixed(2)}",
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: themeProvider.isDarkMode
-                              ? Colors.greenAccent
-                              : Colors.green,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      Text("$totalPoints",
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 17,
+                              color: Colors.amber)),
+                      Text("\$${dollarValue.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.greenAccent,
+                              fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ],
@@ -1502,7 +1540,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ),
     );
   }
-
   // دالة مساعدة لإنشاء الأزرار بحجم أصغر لتجنب الـ Overflow
 
   Widget _buildPointsDisplay(String? uid, int exchangeRate) {
@@ -1836,86 +1873,148 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildAppDrawer(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    // جلب بيانات المستخدم الحالي لعرض صورته
+    final user = FirebaseAuth.instance.currentUser;
 
     return Drawer(
-      backgroundColor:
-          themeProvider.isDarkMode ? const Color(0xFF1A1A2E) : Colors.white,
+      backgroundColor: const Color(0xFF1A1A2E),
       child: Column(
         children: [
-          // رأس القائمة
+          // --- رأس القائمة: صورة البروفايل ---
           UserAccountsDrawerHeader(
-            decoration: const BoxDecoration(color: Color(0xFF1A1A2E)),
-            currentAccountPicture: const CircleAvatar(
-              backgroundColor: Colors.amber,
-              child: Icon(Icons.person, size: 40, color: Colors.black),
+            decoration: const BoxDecoration(color: Colors.amber),
+            currentAccountPicture: CircleAvatar(
+              backgroundColor: const Color(0xFF1A1A2E),
+              backgroundImage:
+                  user?.photoURL != null ? NetworkImage(user!.photoURL!) : null,
+              child: user?.photoURL == null
+                  ? const Icon(Icons.person, size: 45, color: Colors.amber)
+                  : null,
             ),
-            accountName: const Text("Syria Earn Pro",
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            accountEmail: Text(tr('welcome_msg')),
+            accountName: Text(
+              user?.displayName ??
+                  tr('user_name_placeholder'), // نص قابل للترجمة
+              style: const TextStyle(
+                  color: Color(0xFF1A1A2E), fontWeight: FontWeight.bold),
+            ),
+            accountEmail: Text(
+              user?.email ?? "",
+              style: const TextStyle(color: Color(0xFF1A1A2E), fontSize: 12),
+            ),
           ),
 
-          // 1. زر تبديل الوضع (Dark/Light)
-          ListTile(
-            leading: Icon(
-                themeProvider.isDarkMode ? Icons.light_mode : Icons.dark_mode,
-                color: Colors.orange),
-            title: Text(
-                themeProvider.isDarkMode ? "الوضع النهاري" : "الوضع الليلي"),
-            subtitle: const Text("تغيير مظهر التطبيق لراحة العين"),
-            onTap: () {
-              themeProvider.toggleTheme();
-              Navigator.pop(context);
-            },
-          ),
-
-          // 2. سجل النقاط
-          ListTile(
-            leading: const Icon(Icons.history, color: Colors.cyan),
-            title: Text(tr('points_history_title')),
-            subtitle: const Text("شاهد جميع العمليات التي قمت بها"),
+          // 1. سجل النقاط
+          _drawerItem(
+            icon: Icons.history_rounded,
+            title: tr('points_history'), // مترجم
+            subtitle: tr('points_history_desc'), // مترجم
             onTap: () {
               Navigator.pop(context);
               _navigateToHistory();
             },
           ),
 
-          // 3. المتصدرين
-          ListTile(
-            leading: const Icon(Icons.leaderboard, color: Colors.amber),
-            title: const Text("لوحة المتصدرين"),
-            subtitle: const Text("اكتشف ترتيبك بين المستخدمين"),
+          // 2. المتصدرين
+          _drawerItem(
+            icon: Icons.emoji_events_outlined,
+            title: tr('leaderboard_title'), // مترجم
+            subtitle: tr('leaderboard_desc'), // مترجم
             onTap: () {
               Navigator.pop(context);
               _navigateToLeaderboard();
             },
           ),
 
-          // 4. المكافأة اليومية
-          ListTile(
-            leading: const Icon(Icons.card_giftcard, color: Colors.pink),
-            title: const Text("المكافأة اليومية"),
-            subtitle: const Text("احصل على نقاط مجانية كل 24 ساعة"),
-            onTap: () {
-              Navigator.pop(context);
-              _claimDailyReward();
-            },
-          ),
-
-          const Divider(),
-
-          // 5. الإعدادات
-          ListTile(
-            leading: const Icon(Icons.settings, color: Colors.grey),
-            title: Text(tr('settings_title')),
-            subtitle: const Text("إعدادات الحساب والتطبيق"),
+          // 3. الإعدادات
+          _drawerItem(
+            icon: Icons.settings_suggest_outlined,
+            title: tr('settings_title'), // مترجم
+            subtitle: tr('settings_desc'), // مترجم
             onTap: () {
               Navigator.pop(context);
               Navigator.pushNamed(context, '/settings');
             },
           ),
+
+          const Spacer(),
+
+          // 4. تسجيل الخروج
+          _drawerItem(
+            icon: Icons.logout_rounded,
+            title: tr('logout_title'), // مترجم
+            subtitle: tr('logout_desc'), // مترجم
+            onTap: () async {
+              await FirebaseAuth.instance.signOut();
+              if (context.mounted) {
+                Navigator.pushReplacementNamed(context, '/login');
+              }
+            },
+          ),
+          const SizedBox(height: 20),
         ],
       ),
     );
+  }
+
+  // 🛠️ أضف هذه الدالة في أسفل الملف تماماً ليعمل الـ Drawer بدون أخطاء
+  Widget _drawerItem({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.amber.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: Colors.amber, size: 24),
+      ),
+      title: Text(
+        title,
+        style:
+            const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(color: Colors.white38, fontSize: 11),
+      ),
+      onTap: onTap,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+    );
+  }
+
+  // 🛠️ أضف هذه الدالة في أسفل الملف تماماً لإصلاح خطأ زر اللغة
+  Widget _buildSmallActionIcon({
+    required IconData icon,
+    required Color color,
+    required VoidCallback onPressed,
+    bool isPopup = false,
+  }) {
+    return isPopup
+        ? PopupMenuButton<String>(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: Icon(icon, size: 24, color: color),
+            onSelected: (String langCode) async {
+              await EasyLocalization.of(context)?.setLocale(Locale(langCode));
+              if (mounted) setState(() {});
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'ar', child: Text("العربية")),
+              const PopupMenuItem(value: 'en', child: Text("English")),
+              const PopupMenuItem(value: 'es', child: Text("Español")),
+              const PopupMenuItem(value: 'tr', child: Text("Türkçe")),
+              const PopupMenuItem(value: 'hi', child: Text("हिन्दी")),
+            ],
+          )
+        : IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: Icon(icon, size: 24, color: color),
+            onPressed: onPressed,
+          );
   }
 }
