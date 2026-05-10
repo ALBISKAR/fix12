@@ -1409,70 +1409,87 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     double dollarValue = totalPoints / rate;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // الجانب الأيمن: اسم التطبيق بتصميم عصري
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          // --- القسم الأيمن: زر القائمة + اسم التطبيق ---
+          Row(
             children: [
-              Text(
-                "Syria Earn",
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.2,
+              // زر الـ 3 شخطات (المسؤول عن فتح الـ Drawer)
+              Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu_rounded, size: 28),
                   color:
-                      themeProvider.isDarkMode ? Colors.white : Colors.black87,
+                      themeProvider.isDarkMode ? Colors.amber : Colors.black87,
+                  onPressed: () => Scaffold.of(context).openDrawer(),
                 ),
               ),
-              Container(
-                height: 3,
-                width: 40,
-                decoration: BoxDecoration(
-                  color: Colors.amber,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+              const SizedBox(width: 4),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Syria Earn",
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                      color: themeProvider.isDarkMode
+                          ? Colors.white
+                          : Colors.black87,
+                    ),
+                  ),
+                  Container(
+                    height: 3,
+                    width: 30,
+                    decoration: BoxDecoration(
+                      color: Colors.amber,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
 
-          // الجانب الأيسر: بطاقة النقاط (clickable)
+          // --- القسم الأيسر: بطاقة النقاط ---
           InkWell(
             onTap: () => _navigateToWithdraw(uid),
             borderRadius: BorderRadius.circular(15),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: Colors.amber.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
               ),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.stars_rounded,
                       color: Colors.amber, size: 20),
                   const SizedBox(width: 8),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         "$totalPoints",
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 16,
+                          fontSize: 15,
                           color: Colors.amber,
                         ),
                       ),
                       Text(
                         "\$${dollarValue.toStringAsFixed(2)}",
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: 10,
                           color: themeProvider.isDarkMode
                               ? Colors.greenAccent
                               : Colors.green,
-                          fontWeight: FontWeight.w500,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
