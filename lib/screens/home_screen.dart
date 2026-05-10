@@ -1402,143 +1402,80 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 // home_screen.dart
 
   Widget _buildHeader(String? uid, int exchangeRate) {
-    // 1. استدعاء الـ ThemeProvider لضبط الألوان
     final themeProvider = Provider.of<ThemeProvider>(context);
 
-    // 2. تحديد الألوان بناءً على الوضع (ليلي أو نهاري) لضمان التباين
-    Color primaryTextColor =
-        themeProvider.isDarkMode ? Colors.white : const Color(0xFF2D3436);
-    Color secondaryIconColor =
-        themeProvider.isDarkMode ? Colors.white70 : Colors.black54;
-
-    // 3. حساب القيمة الدولارية بناءً على نقاط المستخدم وسعر الصرف
+    // حساب القيمة الدولارية
     double rate = exchangeRate > 0 ? exchangeRate.toDouble() : 1000.0;
     double dollarValue = totalPoints / rate;
 
-    return Padding(
-      padding: const EdgeInsets.all(10.0),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // --- القسم الأيسر: الرصيد (النقاط وما يعادلها بالدولار) ---
-          Expanded(
-            flex: 3, // إعطاء مساحة أكبر لقسم النقاط لتجنب الـ Overflow
-            child: InkWell(
-              onTap: () => _navigateToWithdraw(uid),
-              borderRadius: BorderRadius.circular(10),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.account_circle,
-                        color: primaryTextColor, size: 28),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            "$totalPoints ${tr('points')}",
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                color: Colors.amber,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12),
-                          ),
-                          Text(
-                            "\$${dollarValue.toStringAsFixed(2)}",
-                            maxLines: 1,
-                            style: const TextStyle(
-                                color: Colors.greenAccent,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+          // الجانب الأيمن: اسم التطبيق بتصميم عصري
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Syria Earn",
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.2,
+                  color:
+                      themeProvider.isDarkMode ? Colors.white : Colors.black87,
                 ),
               ),
-            ),
+              Container(
+                height: 3,
+                width: 40,
+                decoration: BoxDecoration(
+                  color: Colors.amber,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ],
           ),
 
-          // --- القسم الأيمن: الأزرار التشغيلية ---
-          Expanded(
-            flex: 5, // مساحة الأزرار الستة
-            child: SingleChildScrollView(
-              scrollDirection:
-                  Axis.horizontal, // حماية إضافية في حال كانت الشاشة صغيرة جداً
+          // الجانب الأيسر: بطاقة النقاط (clickable)
+          InkWell(
+            onTap: () => _navigateToWithdraw(uid),
+            borderRadius: BorderRadius.circular(15),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+              ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  // 1. 🌓 زر تبديل الوضع
-                  _buildSmallIconButton(
-                    icon: themeProvider.isDarkMode
-                        ? Icons.light_mode
-                        : Icons.dark_mode,
-                    color: themeProvider.isDarkMode
-                        ? Colors.amber
-                        : Colors.orangeAccent,
-                    onPressed: () {
-                      themeProvider.toggleTheme();
-                      HapticFeedback.lightImpact();
-                    },
-                  ),
-
-                  // 2. 🌐 زر تغيير اللغة
-                  PopupMenuButton<String>(
-                    padding: EdgeInsets.zero,
-                    icon: Icon(Icons.language,
-                        color: themeProvider.isDarkMode
-                            ? Colors.cyanAccent
-                            : Colors.blue,
-                        size: 22),
-                    onSelected: (String langCode) async {
-                      await EasyLocalization.of(context)
-                          ?.setLocale(Locale(langCode));
-                      if (mounted) setState(() {});
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(value: 'ar', child: Text("العربية")),
-                      const PopupMenuItem(value: 'en', child: Text("English")),
-                      const PopupMenuItem(value: 'es', child: Text("Español")),
-                      const PopupMenuItem(value: 'tr', child: Text("Türkçe")),
-                      const PopupMenuItem(value: 'hi', child: Text("हिन्दी")),
+                  const Icon(Icons.stars_rounded,
+                      color: Colors.amber, size: 20),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        "$totalPoints",
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.amber,
+                        ),
+                      ),
+                      Text(
+                        "\$${dollarValue.toStringAsFixed(2)}",
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: themeProvider.isDarkMode
+                              ? Colors.greenAccent
+                              : Colors.green,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ],
-                  ),
-
-                  // 3. 🎁 زر المكافأة اليومية
-                  _buildSmallIconButton(
-                    icon: Icons.card_giftcard,
-                    color: Colors.pinkAccent,
-                    onPressed: _claimDailyReward,
-                  ),
-
-                  // 4. 🏆 زر المتصدرين
-                  _buildSmallIconButton(
-                    icon: Icons.leaderboard,
-                    color: Colors.amber,
-                    onPressed: _navigateToLeaderboard,
-                  ),
-
-                  // 5. 🕒 زر سجل النقاط
-                  _buildSmallIconButton(
-                    icon: Icons.history_rounded,
-                    color: Colors.cyanAccent,
-                    onPressed: () {
-                      HapticFeedback.mediumImpact();
-                      _navigateToHistory();
-                    },
-                  ),
-
-                  // 6. ⚙️ زر الإعدادات
-                  _buildSmallIconButton(
-                    icon: Icons.settings,
-                    color: secondaryIconColor,
-                    onPressed: () => Navigator.pushNamed(context, '/settings'),
                   ),
                 ],
               ),
@@ -1550,17 +1487,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   // دالة مساعدة لإنشاء الأزرار بحجم أصغر لتجنب الـ Overflow
-  Widget _buildSmallIconButton(
-      {required IconData icon,
-      required Color color,
-      required VoidCallback onPressed}) {
-    return IconButton(
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(),
-      icon: Icon(icon, color: color, size: 22),
-      onPressed: onPressed,
-    );
-  }
 
   Widget _buildPointsDisplay(String? uid, int exchangeRate) {
     return StreamBuilder<DocumentSnapshot>(
@@ -1890,5 +1816,89 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         );
       },
     ).then((_) => timer?.cancel());
+  }
+
+  Widget _buildAppDrawer(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+
+    return Drawer(
+      backgroundColor:
+          themeProvider.isDarkMode ? const Color(0xFF1A1A2E) : Colors.white,
+      child: Column(
+        children: [
+          // رأس القائمة
+          UserAccountsDrawerHeader(
+            decoration: const BoxDecoration(color: Color(0xFF1A1A2E)),
+            currentAccountPicture: const CircleAvatar(
+              backgroundColor: Colors.amber,
+              child: Icon(Icons.person, size: 40, color: Colors.black),
+            ),
+            accountName: const Text("Syria Earn Pro",
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            accountEmail: Text(tr('welcome_msg')),
+          ),
+
+          // 1. زر تبديل الوضع (Dark/Light)
+          ListTile(
+            leading: Icon(
+                themeProvider.isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                color: Colors.orange),
+            title: Text(
+                themeProvider.isDarkMode ? "الوضع النهاري" : "الوضع الليلي"),
+            subtitle: const Text("تغيير مظهر التطبيق لراحة العين"),
+            onTap: () {
+              themeProvider.toggleTheme();
+              Navigator.pop(context);
+            },
+          ),
+
+          // 2. سجل النقاط
+          ListTile(
+            leading: const Icon(Icons.history, color: Colors.cyan),
+            title: Text(tr('points_history_title')),
+            subtitle: const Text("شاهد جميع العمليات التي قمت بها"),
+            onTap: () {
+              Navigator.pop(context);
+              _navigateToHistory();
+            },
+          ),
+
+          // 3. المتصدرين
+          ListTile(
+            leading: const Icon(Icons.leaderboard, color: Colors.amber),
+            title: const Text("لوحة المتصدرين"),
+            subtitle: const Text("اكتشف ترتيبك بين المستخدمين"),
+            onTap: () {
+              Navigator.pop(context);
+              _navigateToLeaderboard();
+            },
+          ),
+
+          // 4. المكافأة اليومية
+          ListTile(
+            leading: const Icon(Icons.card_giftcard, color: Colors.pink),
+            title: const Text("المكافأة اليومية"),
+            subtitle: const Text("احصل على نقاط مجانية كل 24 ساعة"),
+            onTap: () {
+              Navigator.pop(context);
+              _claimDailyReward();
+            },
+          ),
+
+          const Divider(),
+
+          // 5. الإعدادات
+          ListTile(
+            leading: const Icon(Icons.settings, color: Colors.grey),
+            title: Text(tr('settings_title')),
+            subtitle: const Text("إعدادات الحساب والتطبيق"),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.pushNamed(context, '/settings');
+            },
+          ),
+        ],
+      ),
+    );
   }
 }
