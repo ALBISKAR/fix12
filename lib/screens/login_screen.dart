@@ -346,13 +346,14 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         }
 
-        // 5. نظام الإحالة وإنشاء الحساب
-// 5. نظام الإحالة وإنشاء الحساب (نسخة مصلحة)
+// 5. نظام الإحالة وإنشاء الحساب (النسخة المصلحة نهائياً)
         String myCode = user.uid.substring(0, 6).toUpperCase();
         String enteredCode = _referralController.text.trim().toUpperCase();
 
-        if (userCredential.additionalUserInfo!.isNewUser ||
-            !docSnapshot.exists) {
+// التغيير هنا: نتحقق من عدم وجود الوثيقة "أو" أن المستخدم جديد
+        bool userNotFound = !docSnapshot.exists;
+
+        if (userNotFound) {
           String referredByCode = "";
 
           if (enteredCode.isNotEmpty && enteredCode != myCode) {
@@ -367,7 +368,7 @@ class _LoginScreenState extends State<LoginScreen> {
             }
           }
 
-          // إنشاء ملف المستخدم - السيرفر سيتولى زيادة العدادات تلقائياً
+          // استخدام await لضمان اكتمال الكتابة قبل الانتقال
           await userDocRef.set({
             'name': user.displayName,
             'email': user.email,
@@ -379,11 +380,14 @@ class _LoginScreenState extends State<LoginScreen> {
             'createdAt': FieldValue.serverTimestamp(),
             'last_login': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
+
+          debugPrint("✅ تم إنشاء حساب جديد بنجاح");
         } else {
           // تحديث وقت الدخول للمستخدم القديم
           await userDocRef.update({
             'last_login': FieldValue.serverTimestamp(),
           });
+          debugPrint("✅ تم تحديث دخول مستخدم سابق");
         }
 
 // 6. الدخول للشاشة الرئيسية (تأكد من إغلاق حالة التحميل أولاً)

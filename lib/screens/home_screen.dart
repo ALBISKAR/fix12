@@ -917,13 +917,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
 Future<void> _processDailyReward(String uid, int rewardAmount) async {
     try {
-      // إنشاء مرجع للعملية لضمان كتابة الوقت بشكل متناسق
-      final now = DateTime.now(); 
+      // استخدام الوقت المحلي للسجل لتجنب تعارض serverTimestamp داخل المصفوفات
+      final now = DateTime.now();
 
-      // استخدام WriteBatch لضمان تنفيذ العمليتين معاً أو فشلهما معاً
+      // إنشاء Batch لضمان تنفيذ العمليات معاً
       WriteBatch batch = FirebaseFirestore.instance.batch();
 
-      // 1. تسجيل الطلب في مجموعة reward_requests
+      // 1. مرجع طلب المكافأة
       DocumentReference requestRef = FirebaseFirestore.instance.collection('reward_requests').doc();
       batch.set(requestRef, {
         'userId': uid,
@@ -931,7 +931,7 @@ Future<void> _processDailyReward(String uid, int rewardAmount) async {
         'amount': rewardAmount,
       });
 
-      // 2. تحديث بيانات المستخدم
+      // 2. مرجع المستخدم وتحديث البيانات
       DocumentReference userRef = FirebaseFirestore.instance.collection('users').doc(uid);
       batch.update(userRef, {
         'points': FieldValue.increment(rewardAmount),
@@ -940,29 +940,27 @@ Future<void> _processDailyReward(String uid, int rewardAmount) async {
           {
             'type': 'daily_reward_claim',
             'amount': rewardAmount,
-            // نستخدم وقت الجهاز المحلي هنا لتجنب تعارض الـ serverTimestamp داخل المصفوفة
-            'timestamp': now.toIso8601String(), 
+            'timestamp': now.toIso8601String(), // استخدام صيغة وقت ثابتة
           }
         ])
       });
 
-      // تنفيذ الـ Batch
+      // تنفيذ كل العمليات دفعة واحدة
       await batch.commit();
 
       if (!mounted) return;
 
-      // إظهار رسالة النجاح
+      // إظهار رسالة نجاح واضحة
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(tr('reward_processing_msg')),
-          backgroundColor: Colors.green, // غيرته للأخضر ليدل على النجاح
+          backgroundColor: Colors.green, // اللون الأخضر يطمن المستخدم
           behavior: SnackBarBehavior.floating,
         ),
       );
 
     } catch (e) {
       debugPrint("❌ Daily Reward Error: $e");
-      // التحقق مما إذا كان الخطأ حقيقياً أم مجرد تأخير
       if (!mounted) return;
       _showErrorSnackBar(tr('withdraw_error'));
     }
@@ -1028,22 +1026,33 @@ Future<void> _processDailyReward(String uid, int rewardAmount) async {
 
             // حساب الفيديوهات المتبقية لكل سيرفر[cite: 2]
             final List<dynamic> history = userData['points_history'] ?? [];
-            final String todayStr =
-                DateTime.now().toIso8601String().split('T')[0];
 
-            int unityWatched = history.where((item) {
-              if (item['timestamp'] == null) return false;
-              final timestamp = (item['timestamp'] as Timestamp).toDate();
-              return item['type'] == 'unity_ad' &&
-                  timestamp.toIso8601String().split('T')[0] == todayStr;
-            }).length;
+// 1. تعريف الوقت الحالي أولاً
+final DateTime now = DateTime.now();
 
-            int admobWatched = history.where((item) {
-              if (item['timestamp'] == null) return false;
-              final timestamp = (item['timestamp'] as Timestamp).toDate();
-              return item['type'] == 'admob_ad' &&
-                  timestamp.toIso8601String().split('T')[0] == todayStr;
-            }).length;
+// 2. حساب إعلانات Unity اليوم
+int unityWatched = history.where((item) {
+  final rawTimestamp = item['timestamp'];
+  if (rawTimestamp == null || item['type'] != 'unity_ad') return false;
+
+  final DateTime timestamp = (rawTimestamp as Timestamp).toDate();
+  
+  return timestamp.year == now.year && 
+         timestamp.month == now.month && 
+         timestamp.day == now.day;
+}).length;
+
+// 3. حساب إعلانات AdMob اليوم
+int admobWatched = history.where((item) {
+  final rawTimestamp = item['timestamp'];
+  if (rawTimestamp == null || item['type'] != 'admob_ad') return false;
+
+  final DateTime timestamp = (rawTimestamp as Timestamp).toDate();
+  
+  return timestamp.year == now.year && 
+         timestamp.month == now.month && 
+         timestamp.day == now.day;
+}).length;
 
             int unityRemaining =
                 (unityDailyLimit - unityWatched).clamp(0, unityDailyLimit);
