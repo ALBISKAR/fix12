@@ -39,7 +39,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int _unitySecondsLeft = 0;
   int _admobSecondsLeft = 0;
   int unityRewardPoints = 10; // قيمة افتراضية
-  int admobRewardPoints = 15; // قيمة افتراضية
+  int admobRewardPoints = 10; // قيمة افتراضية
   Timer? _unityTimer;
   Timer? _admobTimer;
   BannerAd? _adMobBanner;
@@ -220,6 +220,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       borderRadius: BorderRadius.circular(10)),
                 ),
                 onPressed: () async {
+                  AdManager.showSmartAd();
                   // استخدام url_launcher لفتح الرابط
                   final Uri uri = Uri.parse(url);
                   if (await canLaunchUrl(uri)) {
@@ -334,6 +335,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               onPressed: () async {
+                AdManager.showSmartAd();
                 bool isVpnStillActive = await CheckVpnConnection.isVpnActive();
                 if (!context.mounted) return;
                 if (!isVpnStillActive) {
@@ -497,7 +499,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () {
+                // 1. تسجيل النقرة في نظام الإعلانات
+                AdManager.showSmartAd();
+
+                // 2. العودة للشاشة السابقة
+                Navigator.of(context).pop();
+              },
               child: Text(tr('got_it'),
                   style: TextStyle(color: Colors.blueAccent)),
             ),
@@ -1390,7 +1398,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
               // بما أننا نستخدم Stream، لا نحتاج لاستدعاء دالة يدويًا
               // الزر يمكنه فقط عرض رسالة "سيتم التحديث تلقائيًا" أو تركه فارغاً
-              onPressed: () {},
+              onPressed: () {
+                AdManager.showSmartAd();
+              },
               child: Text(tr('waiting_update'), // "بانتظار التحديث..."
                   style: const TextStyle(color: Colors.black)),
             )
@@ -1417,7 +1427,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   icon: const Icon(Icons.menu_rounded, size: 34),
                   color:
                       themeProvider.isDarkMode ? Colors.amber : Colors.black87,
-                  onPressed: () => Scaffold.of(context).openDrawer(),
+                  onPressed: () {
+                    // 1. زيادة عداد الإعلانات (للوصول للرقم 7)
+                    AdManager.showSmartAd();
+
+                    // 2. فتح القائمة الجانبية
+                    Scaffold.of(context).openDrawer();
+                  },
                 ),
               ),
               const SizedBox(width: 2),
@@ -1444,7 +1460,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         color: themeProvider.isDarkMode
                             ? Colors.amber.withValues(alpha: 0.9)
                             : Colors.black54,
-                        onPressed: () {/* كود تغيير اللغة */},
+                        onPressed: () {
+                          AdManager.showSmartAd();
+                        },
                         isPopup: true,
                       ),
 
@@ -1837,6 +1855,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12))),
                           onPressed: () async {
+                            AdManager.showSmartAd();
                             // 1. إيقاف المؤقت فوراً لتوفير موارد الهاتف
                             timer?.cancel();
 
@@ -1856,6 +1875,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         )
                       : TextButton(
                           onPressed: () {
+                            AdManager.showSmartAd();
                             // إيقاف المؤقت وإغلاق النافذة في حالة عدم توفر الجائزة
                             timer?.cancel();
                             Navigator.pop(ctx);
@@ -2014,7 +2034,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
             icon: Icon(icon, size: 24, color: color),
-            onPressed: onPressed,
+            onPressed: () {
+              // 1. استدعاء مدير الإعلانات
+              AdManager.showSmartAd();
+
+              // 2. استدعاء الوظيفة مباشرة بدون ! وبدون تحقق
+              onPressed();
+            },
           );
   }
 }

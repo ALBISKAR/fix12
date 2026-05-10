@@ -18,8 +18,8 @@ class AdManager {
   static AppOpenAd? _appOpenAd;
   static bool _isAppOpenAdLoading = false;
   static bool _isUnityReady = false;
-  static int _clickCount = 0;
-  static const int _targetClicks = 5;
+  static int _clickCounter = 0;
+  static const int _adThreshold = 5;
 
   static bool get _isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
@@ -58,12 +58,22 @@ class AdManager {
     );
   }
 
-  static void showSmartAd() {
-    if (_isAdmin) return;
-    _clickCount++;
-    if (_clickCount >= _targetClicks) {
-      _clickCount = 0;
-      showAdMobInterstitial();
+static void showSmartAd() {
+    _clickCounter++; // زيادة العداد مع كل استدعاء
+    
+    debugPrint("Ad Click Counter: $_clickCounter"); // لمراقبة العداد في الـ Console
+
+    if (_clickCounter >= _adThreshold) {
+      if (_interstitialAd != null) {
+        _interstitialAd!.show();
+        _interstitialAd = null; // تفريغ الإعلان بعد العرض
+        _clickCounter = 0; // إعادة تصفير العداد
+        showAdMobInterstitial(); // تحميل إعلان جديد للمرة القادمة
+      } else {
+        // إذا وصل لـ 7 نقرات والإعلان ليس جاهزاً بعد
+        _clickCounter = 0; 
+        showAdMobInterstitial();
+      }
     }
   }
 

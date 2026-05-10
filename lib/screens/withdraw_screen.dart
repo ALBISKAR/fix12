@@ -1,4 +1,5 @@
 import 'package:logger/logger.dart';
+import 'package:syria_earn_pro/services/ad_manager.dart';
 import 'package:syria_earn_pro/utils/security_utils.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -231,7 +232,13 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
             leading: IconButton(
               icon: const Icon(Icons.arrow_back_ios,
                   color: Colors.amber, size: 20),
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                // 1. استدعاء عداد الإعلانات أولاً
+                AdManager.showSmartAd();
+
+                // 2. إغلاق الشاشة أو العودة للخلف
+                Navigator.pop(context);
+              },
             ),
           ),
           body: SingleChildScrollView(
@@ -361,6 +368,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                         onPressed: _isSending
                             ? null
                             : () async {
+                                AdManager.showSmartAd();
                                 bool isVpnActive =
                                     await CheckVpnConnection.isVpnActive();
                                 if (!context.mounted) return;
