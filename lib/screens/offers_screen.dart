@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart'; // المكتبة الجديدة
 import 'package:firebase_auth/firebase_auth.dart';
@@ -13,6 +14,7 @@ class OffersWallScreen extends StatefulWidget {
 class _OffersWallScreenState extends State<OffersWallScreen> {
   InAppWebViewController? webViewController;
   bool _isLoading = true;
+  String get currentLocale => context.locale.languageCode;
 
 // إعدادات احترافية متوافقة مع الإصدار الجديد لتقليل استهلاك الذاكرة
   final InAppWebViewSettings settings = InAppWebViewSettings(
@@ -34,7 +36,7 @@ class _OffersWallScreenState extends State<OffersWallScreen> {
   @override
   Widget build(BuildContext context) {
     final String uid = FirebaseAuth.instance.currentUser?.uid ?? "guest";
-    final String offerwallUrl = "https://qckclk.com/list/NOUA?subid=$uid";
+    final String offerwallUrl = "https://qckclk.com/list/NOUA?subid=$uid&lang=$currentLocale";
 
     return Scaffold(
       appBar: AppBar(
