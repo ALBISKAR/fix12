@@ -1144,8 +1144,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             ],
                           ),
                         ),
-                        const Divider(height: 1, color: Colors.white10),
-                        _buildAdsSection(),
                       ],
                     ),
                   ),
@@ -1645,24 +1643,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildAdsSection() {
-    final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUid == 'OeEwi4nMZrPjRLRiqWf1373btQT2') {
-      return const SizedBox.shrink();
-    }
 
-    return Container(
-      height: 60,
-      width: double.infinity,
-      color: Colors
-          .transparent, // جعل الخلفية شفافة لتتناسب مع الـ Gradient الخاص بك
-      alignment: Alignment.center,
-      // تأكد من أن _adMobBanner ليس null قبل العرض لتجنب الـ Red Screen
-      child: _adMobBanner != null
-          ? AdManager.smartBanner(_adMobBanner, forceAdMob: true)
-          : const SizedBox.shrink(),
-    );
-  }
 
   void _navigateToWithdraw(String? uid) {
     // 1. إظهار الإعلان فوراً (تجربة مستخدم أسرع)

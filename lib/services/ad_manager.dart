@@ -8,9 +8,11 @@ import 'package:flutter/foundation.dart'; // من أجل kDebugMode
 class AdManager {
   static const String unityGameId = '6070088';
   static const String adMobBannerId = 'ca-app-pub-3359289133347380/2505476154';
-  static const String adMobRewardedId = 'ca-app-pub-3359289133347380/7487583368';
+  static const String adMobRewardedId =
+      'ca-app-pub-3359289133347380/7487583368';
   static const String appOpenAdId = 'ca-app-pub-3359289133347380/3645365681';
-  static const String adMobInterstitialId = 'ca-app-pub-3359289133347380/1879660708';
+  static const String adMobInterstitialId =
+      'ca-app-pub-3359289133347380/1879660708';
 
   static InterstitialAd? _interstitialAd;
   static AppOpenAd? _appOpenAd;
@@ -43,7 +45,7 @@ class AdManager {
   static void initialize() {
     if (_isAdmin) return;
     MobileAds.instance.initialize();
-    
+
     loadAppOpenAd(); // تحميل إعلان الفتح عند البداية
     loadAdMobInterstitial();
 
@@ -146,9 +148,16 @@ class AdManager {
     );
   }
 
-  static void showUnityVideo({required VoidCallback onReward, VoidCallback? onFailed}) {
-    if (_isAdmin) { onReward(); return; }
-    if (!_isUnityReady) { onFailed?.call(); return; }
+  static void showUnityVideo(
+      {required VoidCallback onReward, VoidCallback? onFailed}) {
+    if (_isAdmin) {
+      onReward();
+      return;
+    }
+    if (!_isUnityReady) {
+      onFailed?.call();
+      return;
+    }
     markUserAsWatching();
     UnityAds.showVideoAd(
       placementId: 'Rewarded_Android',
@@ -157,8 +166,12 @@ class AdManager {
     );
   }
 
-  static void showAdMobVideo({required Function onReward, required Function onFailed}) {
-    if (_isAdmin) { onReward(); return; }
+  static void showAdMobVideo(
+      {required Function onReward, required Function onFailed}) {
+    if (_isAdmin) {
+      onReward();
+      return;
+    }
     RewardedAd.load(
       adUnitId: adMobRewardedId,
       request: const AdRequest(),
@@ -193,5 +206,21 @@ class AdManager {
     if (forceAdMob) return const SizedBox.shrink();
     if (_isUnityReady) return UnityBannerAd(placementId: 'Banner_Android');
     return const SizedBox.shrink();
+  }
+
+  // دالة لإنشاء وتحميل إعلان بانر جديد
+  static BannerAd createBannerAd() {
+    return BannerAd(
+      adUnitId: adMobBannerId,
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (ad) => debugPrint("✅ Banner Ad Loaded"),
+        onAdFailedToLoad: (ad, error) {
+          ad.dispose();
+          debugPrint("❌ Banner Ad Failed: ${error.message}");
+        },
+      ),
+    )..load();
   }
 }
