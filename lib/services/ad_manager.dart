@@ -3,50 +3,34 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:unity_ads_plugin/unity_ads_plugin.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart'; // من أجل kDebugMode
 
 class AdManager {
   static const String unityGameId = '6070088';
   static const String adMobBannerId = 'ca-app-pub-3359289133347380/2505476154';
-  static const String adMobRewardedId =
-      'ca-app-pub-3359289133347380/7487583368';
+  static const String adMobRewardedId = 'ca-app-pub-3359289133347380/7487583368';
   static const String appOpenAdId = 'ca-app-pub-3359289133347380/3645365681';
-  static const String adMobInterstitialId =
-      'ca-app-pub-3359289133347380/1879660708';
+  static const String adMobInterstitialId = 'ca-app-pub-3359289133347380/1879660708';
 
   static InterstitialAd? _interstitialAd;
   static AppOpenAd? _appOpenAd;
   static bool _isAppOpenAdLoading = false;
-  static bool _isShowingAppOpenAd = false; // لمنع تداخل العرض
+  static bool _isShowingAppOpenAd = false;
   static bool _isUnityReady = false;
   static int _clickCounter = 0;
   static const int _adThreshold = 5;
   static DateTime? _appOpenLoadTime;
 
+  // التحقق من الأدمن (UID الحالي الخاص بك)
   static bool get _isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
 
-  // 🛡️ قفل الحساب (وظيفة الأمان الخاصة بك)
-  static Future<void> markUserAsWatching() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null || _isAdmin) return;
-    try {
-      final lockUntil = DateTime.now().add(const Duration(hours: 1));
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .update({'login_lock_until': lockUntil});
-      debugPrint('🛡️ Login locked until $lockUntil');
-    } catch (e) {
-      debugPrint('❌ Lock Error: $e');
-    }
-  }
-
   static void initialize() {
-    if (_isAdmin) return;
+    if (_isAdmin) {
+      debugPrint("🚀 Admin Detected: Ads Initialization Skipped.");
+      return;
+    }
     MobileAds.instance.initialize();
-
-    loadAppOpenAd(); // تحميل إعلان الفتح عند البداية
+    loadAppOpenAd();
     loadAdMobInterstitial();
 
     UnityAds.init(
@@ -62,6 +46,7 @@ class AdManager {
   // ==================== إعلان فتح التطبيق (App Open) ====================
 
   static void loadAppOpenAd() {
+    // استثناء الأدمن من التحميل
     if (_isAdmin || _isAppOpenAdLoading || isAppOpenAdAvailable) return;
 
     _isAppOpenAdLoading = true;
@@ -73,12 +58,10 @@ class AdManager {
           _appOpenAd = ad;
           _appOpenLoadTime = DateTime.now();
           _isAppOpenAdLoading = false;
-          if (kDebugMode) print('✅ AppOpenAd Loaded Successfully');
         },
         onAdFailedToLoad: (error) {
           _isAppOpenAdLoading = false;
           _appOpenAd = null;
-          if (kDebugMode) print('❌ AppOpenAd Failed to Load: $error');
         },
       ),
     );
@@ -86,11 +69,11 @@ class AdManager {
 
   static bool get isAppOpenAdAvailable {
     if (_appOpenAd == null || _appOpenLoadTime == null) return false;
-    // صلاحية الإعلان 4 ساعات
     return DateTime.now().difference(_appOpenLoadTime!).inHours < 4;
   }
 
   static void showAppOpenAd() {
+    // استثناء الأدمن من العرض
     if (_isAdmin || _isShowingAppOpenAd) return;
 
     if (!isAppOpenAdAvailable) {
@@ -99,9 +82,7 @@ class AdManager {
     }
 
     _appOpenAd!.fullScreenContentCallback = FullScreenContentCallback(
-      onAdShowedFullScreenContent: (ad) {
-        _isShowingAppOpenAd = true;
-      },
+      onAdShowedFullScreenContent: (ad) => _isShowingAppOpenAd = true,
       onAdFailedToShowFullScreenContent: (ad, error) {
         _isShowingAppOpenAd = false;
         ad.dispose();
@@ -112,16 +93,17 @@ class AdManager {
         _isShowingAppOpenAd = false;
         ad.dispose();
         _appOpenAd = null;
-        loadAppOpenAd(); // تحميل الإعلان التالي
+        loadAppOpenAd();
       },
     );
-
     _appOpenAd!.show();
   }
 
-  // ======================================================================
+  // ==================== الإعلانات البينية (Smart Ad) ====================
 
   static void showSmartAd() {
+    if (_isAdmin) return; // استثناء الأدمن
+
     _clickCounter++;
     if (_clickCounter >= _adThreshold) {
       if (_interstitialAd != null) {
@@ -137,7 +119,7 @@ class AdManager {
   }
 
   static void loadAdMobInterstitial() {
-    if (_isAdmin) return;
+    if (_isAdmin) return; // لا تحمل الإعلان للأدمن
     InterstitialAd.load(
       adUnitId: adMobInterstitialId,
       request: const AdRequest(),
@@ -148,10 +130,12 @@ class AdManager {
     );
   }
 
-  static void showUnityVideo(
-      {required VoidCallback onReward, VoidCallback? onFailed}) {
+  // ==================== إعلانات المكافأة ====================
+
+  static void showUnityVideo({required VoidCallback onReward, VoidCallback? onFailed}) {
     if (_isAdmin) {
-      onReward();
+      debugPrint("🎯 Admin Reward: Instant Access Granted.");
+      onReward(); // منح الجائزة للأدمن فوراً بدون إعلان
       return;
     }
     if (!_isUnityReady) {
@@ -166,10 +150,9 @@ class AdManager {
     );
   }
 
-  static void showAdMobVideo(
-      {required Function onReward, required Function onFailed}) {
+  static void showAdMobVideo({required Function onReward, required Function onFailed}) {
     if (_isAdmin) {
-      onReward();
+      onReward(); // منح الجائزة للأدمن فوراً
       return;
     }
     RewardedAd.load(
@@ -198,8 +181,11 @@ class AdManager {
     );
   }
 
+  // ==================== البانر (Banner) ====================
+
   static Widget smartBanner(BannerAd? adMobBanner, {bool forceAdMob = false}) {
-    if (_isAdmin) return const SizedBox.shrink();
+    if (_isAdmin) return const SizedBox.shrink(); // الأدمن لا يرى البانر أبداً
+    
     if (adMobBanner != null) {
       return SizedBox(height: 50, child: AdWidget(ad: adMobBanner));
     }
@@ -208,8 +194,8 @@ class AdManager {
     return const SizedBox.shrink();
   }
 
-  // دالة لإنشاء وتحميل إعلان بانر جديد
   static BannerAd createBannerAd() {
+    // ملاحظة: بما أن هذه الدالة ترجع كائن BannerAd، يفضل استدعاؤها بشرط الأدمن في الواجهة (UI)
     return BannerAd(
       adUnitId: adMobBannerId,
       size: AdSize.banner,
@@ -222,5 +208,19 @@ class AdManager {
         },
       ),
     )..load();
+  }
+
+  static Future<void> markUserAsWatching() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || _isAdmin) return;
+    try {
+      final lockUntil = DateTime.now().add(const Duration(hours: 1));
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({'login_lock_until': lockUntil});
+    } catch (e) {
+      debugPrint('❌ Lock Error: $e');
+    }
   }
 }

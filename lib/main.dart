@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // أضفنا هذا السطر للتحقق من المستخدم
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -20,6 +21,10 @@ import 'package:syria_earn_pro/providers/theme_provider.dart';
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
+// إضافة التحقق من الأدمن هنا أيضاً لسهولة استخدامه
+bool get _isAdmin =>
+    FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -27,9 +32,13 @@ void main() async {
   await Firebase.initializeApp();
   await EasyLocalization.ensureInitialized();
 
-  // تهيئة الإعلانات (AdManager يحتوي الآن على App Open)
-  MobileAds.instance.initialize();
-  AdManager.initialize();
+  // تهيئة الإعلانات فقط إذا لم يكن المستخدم هو الأدمن
+  if (!_isAdmin) {
+    MobileAds.instance.initialize();
+    AdManager.initialize();
+  } else {
+    debugPrint("🚫 Admin logged in: MobileAds initialization bypassed.");
+  }
 
   // إعداد قنوات التنبيهات
   await _setupNotificationChannels();
@@ -52,7 +61,6 @@ void main() async {
   );
 }
 
-// دالة إعداد التنبيهات (تم فصلها لتنظيف الـ main)
 Future<void> _setupNotificationChannels() async {
   const AndroidNotificationChannel channel = AndroidNotificationChannel(
     'reward_timer_id',
@@ -72,7 +80,6 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-// استخدام WidgetsBindingObserver لمراقبة حالة التطبيق (فتح/إغلاق) لإظهار إعلان الفتح
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void initState() {
@@ -86,10 +93,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // هذه الدالة المسؤولة عن إظهار إعلان فتح التطبيق عند العودة إليه
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    // تم إضافة شرط الأدمن داخل AdManager.showAppOpenAd مسبقاً، 
+    // ولكن إضافته هنا تزيد من سرعة وأمان التطبيق
+    if (state == AppLifecycleState.resumed && !_isAdmin) {
       AdManager.showAppOpenAd();
     }
   }
@@ -133,8 +141,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         return Scaffold(
           body: Column(
             children: [
-              Expanded(child: child!), // التطبيق يأخذ المساحة المتبقية
-              const GlobalBottomAd(), // الإعلانات في الأسفل تماماً
+              Expanded(child: child!), 
+              // 🛡️ استثناء الأدمن من رؤية إعلان البانر العالمي في الأسفل
+              if (!_isAdmin) const GlobalBottomAd(), 
             ],
           ),
         );
