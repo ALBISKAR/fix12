@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:syria_earn_pro/screens/history_screen.dart';
+import 'package:syria_earn_pro/screens/offers_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:syria_earn_pro/services/ad_manager.dart';
 import 'package:syria_earn_pro/screens/withdraw_screen.dart';
@@ -44,6 +45,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Timer? _unityTimer;
   Timer? _admobTimer;
   BannerAd? _adMobBanner;
+  final bool _canClaimDaily = false;
 
   // 🔐 أضف هذه الدالة تحت المتغيرات في بداية الكلاس
   bool get isAdmin =>
@@ -1161,41 +1163,41 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       padding: const EdgeInsets.all(15),
       child: Column(
         children: [
-          // زر Tapjoy
-          /*ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.indigoAccent,
-                minimumSize: const Size(double.infinity, 60),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15))),
-            onPressed: () => AdManager.showTapjoyOfferwall(),
-            icon: const Icon(Icons.workspace_premium_rounded,
-                color: Colors.white),
-            label: Text(tr('tapjoy_wall'),
-                style: const TextStyle(color: Colors.white, fontSize: 18)),
+          // 1. زر جدار العروض (CPALead Offerwall) - ملوّن وجذاب
+          _buildTaskCard(
+            tr('earn_points_offers'), // "اربح مئات النقاط" (أضفها لملفات اللغة)
+            tr('offers_wall_sub'), // "أكمل العروض البسيطة واحصل على مكافآت فورية"
+            500, // قيمة تقديرية للنقاط لجذب المستخدم
+            Icons.local_fire_department_rounded, // أيقونة "نار" لتوحي بالحماس
+            () {
+              // الانتقال لشاشة جدار العروض التي أنشأناها سابقاً
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (context) => const OffersWallScreen()),
+              );
+            },
+            isPremium: true, // تفعيل التصميم الذهبي/الملون لجعله جذاباً
           ),
-          const SizedBox(height: 15),
-            */
-          // ✅ زر التقييم بـ 25 نقطة مترجم وبدون أخطاء
+
+          const SizedBox(height: 12), // مسافة بسيطة بين البطاقات
+
+          // 2. زر تقييم التطبيق (كما كان في كودك)
           _buildTaskCard(
             hasRated ? tr('rated_thanks') : tr('rate_app_title'),
             hasRated ? "" : tr('rate_app_sub'),
             25,
             Icons.stars_rounded,
             hasRated
-                ? () {} // تعطيل النقر تماماً بعد الحصول على النقاط
+                ? () {}
                 : () async {
                     const String url =
                         "https://play.google.com/store/apps/details?id=com.mohamad.syria_earn";
                     final Uri uri = Uri.parse(url);
-
                     try {
                       if (await canLaunchUrl(uri)) {
-                        // 1. فتح المتجر للمستخدم
                         await launchUrl(uri,
                             mode: LaunchMode.externalApplication);
-
-                        // 2. إظهار نافذة "التحقق الوهمي" مع العداد التنازلي
                         if (mounted) {
                           _showFakeVerificationDialog();
                         }
@@ -1205,7 +1207,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       if (mounted) _showErrorSnackBar(tr('error_occurred'));
                     }
                   },
-            isPremium: !hasRated, // سيتوقف التصميم الملون (الذهبي) بعد التقييم
+            isPremium: !hasRated,
           ),
         ],
       ),
@@ -1476,37 +1478,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
 
                       const SizedBox(width: 10),
-
-                      // 🎁 زر المكافأة اليومية مع النقطة الحمراء
-                      GestureDetector(
-                        onTap: _claimDailyReward,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            const Icon(
-                              Icons.card_giftcard_rounded,
-                              size: 28, // حجم أكبر لجذب الانتباه
-                              color: Colors.pinkAccent,
-                            ),
-                            // النقطة الحمراء للتنبيه
-                            Positioned(
-                              right: -2,
-                              top: -2,
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: const BoxDecoration(
-                                  color: Colors.red,
-                                  shape: BoxShape.circle,
-                                ),
-                                constraints: const BoxConstraints(
-                                  minWidth: 10,
-                                  minHeight: 10,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
                     ],
                   ),
                   Container(
@@ -1902,14 +1873,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildAppDrawer(BuildContext context) {
-    // جلب بيانات المستخدم الحالي لعرض صورته
     final user = FirebaseAuth.instance.currentUser;
 
     return Drawer(
       backgroundColor: const Color(0xFF1A1A2E),
       child: Column(
         children: [
-          // --- رأس القائمة: صورة البروفايل ---
           UserAccountsDrawerHeader(
             decoration: const BoxDecoration(color: Colors.amber),
             currentAccountPicture: CircleAvatar(
@@ -1921,44 +1890,54 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   : null,
             ),
             accountName: Text(
-              user?.displayName ??
-                  tr('user_name_placeholder'), // نص قابل للترجمة
+              user?.displayName ?? tr('user_name_placeholder'),
               style: const TextStyle(
                   color: Color(0xFF1A1A2E), fontWeight: FontWeight.bold),
             ),
-            accountEmail: Text(
-              user?.email ?? "",
-              style: const TextStyle(color: Color(0xFF1A1A2E), fontSize: 12),
-            ),
+            accountEmail: Text(user?.email ?? "",
+                style: const TextStyle(color: Color(0xFF1A1A2E), fontSize: 12)),
           ),
 
-          // 1. سجل النقاط
+          // ✅ تم استخدام _canClaimDaily حسب ملفك الأصلي
+// داخل _buildAppDrawer
+_drawerItem(
+  icon: Icons.card_giftcard_rounded,
+  title: tr('daily_reward'),
+  // هنا نمرر المتغير الموجود في الكلاس لديك
+  subtitle: _canClaimDaily ? tr('reward_available') : tr('reward_claimed'), 
+  onTap: () {
+    Navigator.pop(context);
+    _claimDailyReward();
+  },
+  showBadge: _canClaimDaily, // 👈 نرسل الحالة هنا بوضوح
+),
+
+          const Divider(color: Colors.white10, indent: 20, endIndent: 20),
+
           _drawerItem(
             icon: Icons.history_rounded,
-            title: tr('points_history'), // مترجم
-            subtitle: tr('points_history_desc'), // مترجم
+            title: tr('points_history'),
+            subtitle: tr('points_history_desc'),
             onTap: () {
               Navigator.pop(context);
               _navigateToHistory();
             },
           ),
 
-          // 2. المتصدرين
           _drawerItem(
             icon: Icons.emoji_events_outlined,
-            title: tr('leaderboard_title'), // مترجم
-            subtitle: tr('leaderboard_desc'), // مترجم
+            title: tr('leaderboard_title'),
+            subtitle: tr('leaderboard_desc'),
             onTap: () {
               Navigator.pop(context);
               _navigateToLeaderboard();
             },
           ),
 
-          // 3. الإعدادات
           _drawerItem(
             icon: Icons.settings_suggest_outlined,
-            title: tr('settings_title'), // مترجم
-            subtitle: tr('settings_desc'), // مترجم
+            title: tr('settings_title'),
+            subtitle: tr('settings_desc'),
             onTap: () {
               Navigator.pop(context);
               Navigator.pushNamed(context, '/settings');
@@ -1967,11 +1946,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
           const Spacer(),
 
-          // 4. تسجيل الخروج
           _drawerItem(
             icon: Icons.logout_rounded,
-            title: tr('logout_title'), // مترجم
-            subtitle: tr('logout_desc'), // مترجم
+            title: tr('logout_title'),
+            subtitle: tr('logout_desc'),
             onTap: () async {
               await FirebaseAuth.instance.signOut();
               if (context.mounted) {
@@ -1985,35 +1963,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // 🛠️ أضف هذه الدالة في أسفل الملف تماماً ليعمل الـ Drawer بدون أخطاء
-  Widget _drawerItem({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.amber.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(icon, color: Colors.amber, size: 24),
-      ),
-      title: Text(
-        title,
-        style:
-            const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: const TextStyle(color: Colors.white38, fontSize: 11),
-      ),
-      onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-    );
-  }
+Widget _drawerItem({
+  required IconData icon,
+  required String title,
+  required String subtitle,
+  required VoidCallback onTap,
+  bool showBadge = false, // 👈 أضفنا هذا المعامل الجديد للنقطة الحمراء
+}) {
+  return ListTile(
+    leading: Stack(
+      children: [
+        Icon(icon, color: Colors.amber, size: 28),
+        if (showBadge) // 👈 نستخدم المعامل الجديد هنا
+          Positioned(
+            right: 0,
+            top: 0,
+            child: Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: Colors.red,
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFF1A1A2E), width: 1.5),
+              ),
+            ),
+          ),
+      ],
+    ),
+    title: Text(title,
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+    subtitle: Text(subtitle,
+        style: const TextStyle(color: Colors.white54, fontSize: 11)),
+    onTap: onTap,
+  );
+}
 
   // 🛠️ أضف هذه الدالة في أسفل الملف تماماً لإصلاح خطأ زر اللغة
   Widget _buildSmallActionIcon({
