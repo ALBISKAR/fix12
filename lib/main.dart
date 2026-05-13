@@ -1,10 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:provider/provider.dart';
+
+// Imports الشاشات والخدمات
 import 'package:syria_earn_pro/screens/home_screen.dart';
 import 'package:syria_earn_pro/screens/login_screen.dart';
 import 'package:syria_earn_pro/screens/withdraw_screen.dart';
@@ -22,18 +23,21 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. تشغيل اللغات والـ Firebase (أساسي للواجهة)
-  await EasyLocalization.ensureInitialized();
+  // 1. تهيئة الخدمات الأساسية بترتيب صحيح
   await Firebase.initializeApp();
+  await EasyLocalization.ensureInitialized();
+  
+  // تهيئة الإعلانات (AdManager يحتوي الآن على App Open)
+  MobileAds.instance.initialize();
+  AdManager.initialize();
+
+  // إعداد قنوات التنبيهات
+  await _setupNotificationChannels();
 
   runApp(
     EasyLocalization(
       supportedLocales: const [
-        Locale('ar'),
-        Locale('tr'),
-        Locale('en'),
-        Locale('es'),
-        Locale('hi')
+        Locale('ar'), Locale('tr'), Locale('en'), Locale('es'), Locale('hi')
       ],
       path: 'assets/translations',
       child: ChangeNotifierProvider(
@@ -42,48 +46,49 @@ void main() async {
       ),
     ),
   );
-
-  // 2. تشغيل الإعلانات بعد فترة قصيرة جداً لضمان ظهور الواجهة أولاً
-  Future.delayed(const Duration(milliseconds: 500), () {
-    MobileAds.instance.initialize();
-    AdManager.initialize();
-    // AdManager.connectTapjoy();
-  });
 }
 
-// دالة منفصلة للإعدادات لضمان عدم حبس المستخدم في شاشة بيضاء
-Future<void> setupServices() async {
-  try {
-    await Firebase.initializeApp();
-    AdManager.initialize();
-    AdManager.connectTapjoy(); // بدون await هنا لضمان السرعة
-
-    // جلب الإعدادات (يفضل وضعها داخل Provider أو Bloc لاحقاً)
-    FirebaseFirestore.instance
-        .collection('app_settings')
-        .doc('config')
-        .get()
-        .then((doc) {
-      if (doc.exists) debugPrint("✅ Connected to Firestore Config");
-    });
-
-    // إعداد التنبيهات
-    const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'reward_timer_id',
-      'تنبيهات المكافآت',
-      importance: Importance.max,
-    );
-    await flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
-  } catch (e) {
-    debugPrint("❌ Initialization Error: $e");
-  }
+// دالة إعداد التنبيهات (تم فصلها لتنظيف الـ main)
+Future<void> _setupNotificationChannels() async {
+  const AndroidNotificationChannel channel = AndroidNotificationChannel(
+    'reward_timer_id',
+    'تنبيهات المكافآت',
+    importance: Importance.max,
+  );
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+// استخدام WidgetsBindingObserver لمراقبة حالة التطبيق (فتح/إغلاق) لإظهار إعلان الفتح
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // هذه الدالة المسؤولة عن إظهار إعلان فتح التطبيق عند العودة إليه
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      AdManager.showAppOpenAd();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -97,7 +102,6 @@ class MyApp extends StatelessWidget {
       locale: context.locale,
       themeMode: themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light,
 
-      // ثيم التطبيق (فاتح)
       theme: ThemeData(
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFF5F7FA),
@@ -114,24 +118,22 @@ class MyApp extends StatelessWidget {
         ),
       ),
 
-      // ثيم التطبيق (مظلم)
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: Colors.black,
-        primarySwatch: Colors.indigo,
+        primaryColor: Colors.indigo,
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.black,
           elevation: 0,
         ),
       ),
 
-      // الإعلان السفلي الثابت في كل التطبيق
       builder: (context, child) {
         return Scaffold(
           body: Column(
             children: [
               Expanded(child: child!),
-              const GlobalBottomAd(),
+              const GlobalBottomAd(), // الإعلان السفلي الثابت
             ],
           ),
         );

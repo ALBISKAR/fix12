@@ -3,20 +3,19 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:unity_ads_plugin/unity_ads_plugin.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-//import 'package:flutter_tapjoy/flutter_tapjoy.dart';
+import 'package:flutter/foundation.dart'; // من أجل kDebugMode
 
 class AdManager {
   static const String unityGameId = '6070088';
   static const String adMobBannerId = 'ca-app-pub-3359289133347380/2505476154';
-  static const String adMobRewardedId =
-      'ca-app-pub-3359289133347380/7487583368';
+  static const String adMobRewardedId = 'ca-app-pub-3359289133347380/7487583368';
   static const String appOpenAdId = 'ca-app-pub-3359289133347380/3645365681';
-  static const String adMobInterstitialId =
-      'ca-app-pub-3359289133347380/1879660708';
+  static const String adMobInterstitialId = 'ca-app-pub-3359289133347380/1879660708';
 
   static InterstitialAd? _interstitialAd;
   static AppOpenAd? _appOpenAd;
   static bool _isAppOpenAdLoading = false;
+  static bool _isShowingAppOpenAd = false; // لمنع تداخل العرض
   static bool _isUnityReady = false;
   static int _clickCounter = 0;
   static const int _adThreshold = 5;
@@ -25,7 +24,7 @@ class AdManager {
   static bool get _isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
 
-  // 🛡️ قفل الحساب لمدة ساعة
+  // 🛡️ قفل الحساب (وظيفة الأمان الخاصة بك)
   static Future<void> markUserAsWatching() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _isAdmin) return;
@@ -34,9 +33,7 @@ class AdManager {
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .update({
-        'login_lock_until': lockUntil,
-      });
+          .update({'login_lock_until': lockUntil});
       debugPrint('🛡️ Login locked until $lockUntil');
     } catch (e) {
       debugPrint('❌ Lock Error: $e');
@@ -46,9 +43,10 @@ class AdManager {
   static void initialize() {
     if (_isAdmin) return;
     MobileAds.instance.initialize();
-    loadAppOpenAd();
+    
+    loadAppOpenAd(); // تحميل إعلان الفتح عند البداية
     loadAdMobInterstitial();
-    if (_isUnityReady) return;
+
     UnityAds.init(
       gameId: unityGameId,
       testMode: false,
@@ -59,44 +57,81 @@ class AdManager {
     );
   }
 
+  // ==================== إعلان فتح التطبيق (App Open) ====================
+
+  static void loadAppOpenAd() {
+    if (_isAdmin || _isAppOpenAdLoading || isAppOpenAdAvailable) return;
+
+    _isAppOpenAdLoading = true;
+    AppOpenAd.load(
+      adUnitId: appOpenAdId,
+      request: const AdRequest(),
+      adLoadCallback: AppOpenAdLoadCallback(
+        onAdLoaded: (ad) {
+          _appOpenAd = ad;
+          _appOpenLoadTime = DateTime.now();
+          _isAppOpenAdLoading = false;
+          if (kDebugMode) print('✅ AppOpenAd Loaded Successfully');
+        },
+        onAdFailedToLoad: (error) {
+          _isAppOpenAdLoading = false;
+          _appOpenAd = null;
+          if (kDebugMode) print('❌ AppOpenAd Failed to Load: $error');
+        },
+      ),
+    );
+  }
+
+  static bool get isAppOpenAdAvailable {
+    if (_appOpenAd == null || _appOpenLoadTime == null) return false;
+    // صلاحية الإعلان 4 ساعات
+    return DateTime.now().difference(_appOpenLoadTime!).inHours < 4;
+  }
+
+  static void showAppOpenAd() {
+    if (_isAdmin || _isShowingAppOpenAd) return;
+
+    if (!isAppOpenAdAvailable) {
+      loadAppOpenAd();
+      return;
+    }
+
+    _appOpenAd!.fullScreenContentCallback = FullScreenContentCallback(
+      onAdShowedFullScreenContent: (ad) {
+        _isShowingAppOpenAd = true;
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        _isShowingAppOpenAd = false;
+        ad.dispose();
+        _appOpenAd = null;
+        loadAppOpenAd();
+      },
+      onAdDismissedFullScreenContent: (ad) {
+        _isShowingAppOpenAd = false;
+        ad.dispose();
+        _appOpenAd = null;
+        loadAppOpenAd(); // تحميل الإعلان التالي
+      },
+    );
+
+    _appOpenAd!.show();
+  }
+
+  // ======================================================================
+
   static void showSmartAd() {
-    _clickCounter++; // زيادة العداد مع كل استدعاء
-
-    debugPrint(
-        "Ad Click Counter: $_clickCounter"); // لمراقبة العداد في الـ Console
-
+    _clickCounter++;
     if (_clickCounter >= _adThreshold) {
       if (_interstitialAd != null) {
         _interstitialAd!.show();
-        _interstitialAd = null; // تفريغ الإعلان بعد العرض
-        _clickCounter = 0; // إعادة تصفير العداد
-        showAdMobInterstitial(); // تحميل إعلان جديد للمرة القادمة
-      } else {
-        // إذا وصل لـ 7 نقرات والإعلان ليس جاهزاً بعد
+        _interstitialAd = null;
         _clickCounter = 0;
-        showAdMobInterstitial();
+        loadAdMobInterstitial();
+      } else {
+        _clickCounter = 0;
+        loadAdMobInterstitial();
       }
     }
-  }
-
-  static void showAdMobInterstitial() {
-    if (_isAdmin || _interstitialAd == null) {
-      loadAdMobInterstitial();
-      return;
-    }
-    _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
-      onAdDismissedFullScreenContent: (ad) {
-        ad.dispose();
-        _interstitialAd = null;
-        loadAdMobInterstitial();
-      },
-      onAdFailedToShowFullScreenContent: (ad, error) {
-        ad.dispose();
-        _interstitialAd = null;
-        loadAdMobInterstitial();
-      },
-    );
-    _interstitialAd!.show();
   }
 
   static void loadAdMobInterstitial() {
@@ -111,17 +146,9 @@ class AdManager {
     );
   }
 
-  static void showUnityVideo(
-      {required VoidCallback onReward, VoidCallback? onFailed}) {
-    if (_isAdmin) {
-      onReward();
-      return;
-    }
-    if (!_isUnityReady) {
-      onFailed?.call();
-      return;
-    }
-
+  static void showUnityVideo({required VoidCallback onReward, VoidCallback? onFailed}) {
+    if (_isAdmin) { onReward(); return; }
+    if (!_isUnityReady) { onFailed?.call(); return; }
     markUserAsWatching();
     UnityAds.showVideoAd(
       placementId: 'Rewarded_Android',
@@ -130,12 +157,8 @@ class AdManager {
     );
   }
 
-  static void showAdMobVideo(
-      {required Function onReward, required Function onFailed}) {
-    if (_isAdmin) {
-      onReward();
-      return;
-    }
+  static void showAdMobVideo({required Function onReward, required Function onFailed}) {
+    if (_isAdmin) { onReward(); return; }
     RewardedAd.load(
       adUnitId: adMobRewardedId,
       request: const AdRequest(),
@@ -151,74 +174,6 @@ class AdManager {
         onAdFailedToLoad: (err) => onFailed(),
       ),
     );
-  }
-
-// ✅ دالة الاتصال بـ Tapjoy باستخدام الكود المصدري الخاص بك
-  static void connectTapjoy() {
-    // اترك الدالة فارغة حالياً لإيقاف الاتصال بالسيرفرات تماماً
-    // Tapjoy.connect(apiKey, ...);
-    debugPrint("Tapjoy is temporarily disabled for this update.");
-  }
-
-  static Future<void> showTapjoyOfferwall() async {}
-
-  static void loadAppOpenAd() {
-    // منع التحميل إذا كان أدمن، أو قيد التحميل، أو الإعلان موجود وصالح
-    if (_isAdmin || _isAppOpenAdLoading || isAppOpenAdAvailable) return;
-
-    _isAppOpenAdLoading = true;
-    AppOpenAd.load(
-      adUnitId: appOpenAdId,
-      request: const AdRequest(),
-      adLoadCallback: AppOpenAdLoadCallback(
-        onAdLoaded: (ad) {
-          _appOpenAd = ad;
-          _appOpenLoadTime = DateTime.now(); // تسجيل وقت التحميل
-          _isAppOpenAdLoading = false;
-          debugPrint('✅ AppOpenAd Loaded');
-        },
-        onAdFailedToLoad: (error) {
-          _isAppOpenAdLoading = false;
-          _appOpenAd = null;
-          debugPrint('❌ AppOpenAd Failed to Load: $error');
-        },
-      ),
-    );
-  }
-
-// دالة فحص صلاحية الإعلان (إعلانات الفتح صالحة لـ 4 ساعات فقط)
-  static bool get isAppOpenAdAvailable {
-    if (_appOpenAd == null || _appOpenLoadTime == null) return false;
-    return DateTime.now().difference(_appOpenLoadTime!).inHours < 4;
-  }
-
-  static void showAppOpenAd() {
-    // إذا لم يكن الإعلان متاحاً، ابدأ بالتحميل وخرج
-    if (_isAdmin || !isAppOpenAdAvailable) {
-      debugPrint('⚠️ AppOpenAd not available, loading...');
-      loadAppOpenAd();
-      return;
-    }
-
-    _appOpenAd!.fullScreenContentCallback = FullScreenContentCallback(
-      onAdShowedFullScreenContent: (ad) {
-        debugPrint('📱 AppOpenAd showing');
-      },
-      onAdFailedToShowFullScreenContent: (ad, error) {
-        debugPrint('❌ AppOpenAd failed to show: $error');
-        ad.dispose();
-        _appOpenAd = null;
-        loadAppOpenAd();
-      },
-      onAdDismissedFullScreenContent: (ad) {
-        debugPrint('✅ AppOpenAd dismissed');
-        ad.dispose();
-        _appOpenAd = null;
-        loadAppOpenAd(); // تحميل الإعلان القادم فوراً
-      },
-    );
-
-    _appOpenAd!.show();
   }
 
   static void loadUnityAd(String placementId) {
