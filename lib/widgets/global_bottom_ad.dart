@@ -23,6 +23,7 @@ class _GlobalBottomAdState extends State<GlobalBottomAd> {
 
   void _loadAdMobBanner() {
     final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
+    // استثناء المسؤول
     if (currentUid == 'OeEwi4nMZrPjRLRiqWf1373btQT2') return;
 
     _adMobBanner = BannerAd(
@@ -31,11 +32,15 @@ class _GlobalBottomAdState extends State<GlobalBottomAd> {
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
-          if (mounted) setState(() => _isAdMobLoaded = true);
+          debugPrint("✅ AdMob Banner Loaded Successfully");
+          if (mounted) {
+            setState(() => _isAdMobLoaded = true);
+          }
         },
         onAdFailedToLoad: (ad, error) {
+          debugPrint("❌ AdMob Banner Failed: ${error.message}");
           ad.dispose();
-          if (mounted) setState(() => _isAdMobLoaded = false);
+          // لا تقم بتغيير الحالة لـ false هنا فوراً لإعطاء فرصة لإعادة المحاولة لاحقاً
         },
       ),
     )..load();
@@ -50,35 +55,38 @@ class _GlobalBottomAdState extends State<GlobalBottomAd> {
   @override
   Widget build(BuildContext context) {
     final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
-    // إذا كنت أنت المطور، لا تعرض شيئاً
     if (currentUid == 'OeEwi4nMZrPjRLRiqWf1373btQT2') {
       return const SizedBox.shrink();
     }
 
-    return Column(
-      mainAxisSize: MainAxisSize.min, // ليأخذ مساحة الإعلانات فقط
-      children: [
-        // 1. مساحة إعلان AdMob (تظهر فقط إذا توفر الإعلان)
-        if (_isAdMobLoaded && _adMobBanner != null)
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: AdWidget(ad: _adMobBanner!),
-          ),
+    return Container(
+      color: Colors.black
+          .withValues(alpha: 0.05), // خلفية خفيفة جداً لتمييز منطقة الإعلانات
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 1. مساحة AdMob
+          if (_isAdMobLoaded && _adMobBanner != null)
+            SizedBox(
+              height: 50,
+              width: double.infinity,
+              child: AdWidget(ad: _adMobBanner!),
+            ),
 
-        // 2. مساحة إعلان Unity (تظهر فقط إذا توفر الإعلان)
-        // ويدجيت Unity يعالج نفسه داخلياً، سيعرض مساحة فارغة إذا لم يتوفر
-        SizedBox(
-          width: double.infinity,
-          height: 50,
-          child: UnityBannerAd(
-            placementId: 'Banner_Android',
-            onLoad: (id) => debugPrint('✅ Unity Banner Loaded'),
-            onFailed: (id, error, message) => 
-                debugPrint('❌ Unity Banner Not Available'),
+          // 2. مساحة Unity (المعدلة لضمان الظهور)
+          SizedBox(
+            height: 50,
+            width: double.infinity,
+            child: UnityBannerAd(
+              placementId: 'Banner_Android',
+              onLoad: (id) => debugPrint('✅ Unity Banner Loaded: $id'),
+              onFailed: (id, error, message) =>
+                  debugPrint('❌ Unity Banner Failed: $message'),
+              onClick: (id) => debugPrint('Unity Banner Clicked: $id'),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

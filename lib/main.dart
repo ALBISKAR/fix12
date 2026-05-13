@@ -26,7 +26,7 @@ void main() async {
   // 1. تهيئة الخدمات الأساسية بترتيب صحيح
   await Firebase.initializeApp();
   await EasyLocalization.ensureInitialized();
-  
+
   // تهيئة الإعلانات (AdManager يحتوي الآن على App Open)
   MobileAds.instance.initialize();
   AdManager.initialize();
@@ -37,7 +37,11 @@ void main() async {
   runApp(
     EasyLocalization(
       supportedLocales: const [
-        Locale('ar'), Locale('tr'), Locale('en'), Locale('es'), Locale('hi')
+        Locale('ar'),
+        Locale('tr'),
+        Locale('en'),
+        Locale('es'),
+        Locale('hi')
       ],
       path: 'assets/translations',
       child: ChangeNotifierProvider(
@@ -56,7 +60,8 @@ Future<void> _setupNotificationChannels() async {
     importance: Importance.max,
   );
   await flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
 }
 
@@ -69,7 +74,6 @@ class MyApp extends StatefulWidget {
 
 // استخدام WidgetsBindingObserver لمراقبة حالة التطبيق (فتح/إغلاق) لإظهار إعلان الفتح
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
-  
   @override
   void initState() {
     super.initState();
@@ -101,7 +105,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       supportedLocales: context.supportedLocales,
       locale: context.locale,
       themeMode: themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light,
-
       theme: ThemeData(
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFF5F7FA),
@@ -117,7 +120,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           foregroundColor: Color(0xFF2D3436),
         ),
       ),
-
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: Colors.black,
@@ -127,18 +129,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           elevation: 0,
         ),
       ),
-
       builder: (context, child) {
         return Scaffold(
           body: Column(
             children: [
-              Expanded(child: child!),
-              const GlobalBottomAd(), // الإعلان السفلي الثابت
+              Expanded(child: child!), // التطبيق يأخذ المساحة المتبقية
+              const GlobalBottomAd(), // الإعلانات في الأسفل تماماً
             ],
           ),
         );
       },
-
       initialRoute: '/',
       routes: {
         '/': (context) => const SplashScreen(),
