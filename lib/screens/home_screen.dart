@@ -1900,17 +1900,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
           // ✅ تم استخدام _canClaimDaily حسب ملفك الأصلي
 // داخل _buildAppDrawer
-_drawerItem(
-  icon: Icons.card_giftcard_rounded,
-  title: tr('daily_reward'),
-  // هنا نمرر المتغير الموجود في الكلاس لديك
-  subtitle: _canClaimDaily ? tr('reward_available') : tr('reward_claimed'), 
-  onTap: () {
-    Navigator.pop(context);
-    _claimDailyReward();
-  },
-  showBadge: _canClaimDaily, // 👈 نرسل الحالة هنا بوضوح
-),
+          _drawerItem(
+            icon: Icons.card_giftcard_rounded,
+            title: tr('daily_reward'),
+            // هنا نمرر المتغير الموجود في الكلاس لديك
+            subtitle:
+                _canClaimDaily ? tr('reward_available') : tr('reward_claimed'),
+            onTap: () {
+              Navigator.pop(context);
+              _claimDailyReward();
+            },
+            showBadge: _canClaimDaily, // 👈 نرسل الحالة هنا بوضوح
+          ),
 
           const Divider(color: Colors.white10, indent: 20, endIndent: 20),
 
@@ -1963,40 +1964,42 @@ _drawerItem(
     );
   }
 
-Widget _drawerItem({
-  required IconData icon,
-  required String title,
-  required String subtitle,
-  required VoidCallback onTap,
-  bool showBadge = false, // 👈 أضفنا هذا المعامل الجديد للنقطة الحمراء
-}) {
-  return ListTile(
-    leading: Stack(
-      children: [
-        Icon(icon, color: Colors.amber, size: 28),
-        if (showBadge) // 👈 نستخدم المعامل الجديد هنا
-          Positioned(
-            right: 0,
-            top: 0,
-            child: Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFF1A1A2E), width: 1.5),
+  Widget _drawerItem({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    bool showBadge = false, // 👈 أضفنا هذا المعامل الجديد للنقطة الحمراء
+  }) {
+    return ListTile(
+      leading: Stack(
+        children: [
+          Icon(icon, color: Colors.amber, size: 28),
+          if (showBadge) // 👈 نستخدم المعامل الجديد هنا
+            Positioned(
+              right: 0,
+              top: 0,
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                  border:
+                      Border.all(color: const Color(0xFF1A1A2E), width: 1.5),
+                ),
               ),
             ),
-          ),
-      ],
-    ),
-    title: Text(title,
-        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-    subtitle: Text(subtitle,
-        style: const TextStyle(color: Colors.white54, fontSize: 11)),
-    onTap: onTap,
-  );
-}
+        ],
+      ),
+      title: Text(title,
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.w600)),
+      subtitle: Text(subtitle,
+          style: const TextStyle(color: Colors.white54, fontSize: 11)),
+      onTap: onTap,
+    );
+  }
 
   // 🛠️ أضف هذه الدالة في أسفل الملف تماماً لإصلاح خطأ زر اللغة
   Widget _buildSmallActionIcon({
