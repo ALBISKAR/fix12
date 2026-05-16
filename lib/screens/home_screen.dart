@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:syria_earn_pro/screens/history_screen.dart';
+import 'package:syria_earn_pro/screens/offers_tab_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:syria_earn_pro/services/ad_manager.dart';
 import 'package:syria_earn_pro/screens/withdraw_screen.dart';
@@ -17,10 +18,6 @@ import 'package:check_vpn_connection/check_vpn_connection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-
-// استيراد الملفات المقسمة الجديدة
-import 'package:syria_earn_pro/screens/videos_tab_screen.dart';
-import 'package:syria_earn_pro/screens/offers_tab_screen.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -47,16 +44,45 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Timer? _unityTimer;
   Timer? _admobTimer;
   BannerAd? _adMobBanner;
+
+  // 🛡️ الاستخدام الحركي الآمن لمتغير المكافأة اليومية
   bool _canClaimDaily = false;
+
+  // كائن الاستماع العام لحالة الشبكة لمنع الـ Memory Leaks والتحذيرات
+  StreamSubscription? _networkSubscription;
 
   bool get isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
+
   StreamSubscription<DocumentSnapshot>? _banListener;
 
   void _navigateToHistory() {
     AdManager.showSmartAd();
+    if (!mounted) return;
     Navigator.push(
-        context, MaterialPageRoute(builder: (c) => const HistoryScreen()));
+      context,
+      MaterialPageRoute(builder: (c) => const HistoryScreen()),
+    );
+  }
+
+  void _navigateToWithdraw(String? uid) {
+    AdManager.showSmartAd();
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (c) => const WithdrawScreen()),
+      );
+    }
+  }
+
+  void _navigateToLeaderboard() {
+    AdManager.showSmartAd();
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (c) => const LeaderboardScreen()),
+      );
+    }
   }
 
   void _startBanListener() {
@@ -75,13 +101,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         if (isBanned) {
           _banListener?.cancel();
           await FirebaseAuth.instance.signOut();
+
           if (!mounted) return;
           Navigator.pushNamedAndRemoveUntil(
               context, '/login', (route) => false);
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
               content: Text(tr('banned_msg')),
               backgroundColor: Colors.red,
-              duration: const Duration(seconds: 10)));
+              duration: const Duration(seconds: 10),
+            ),
+          );
         }
       }
     });
@@ -96,17 +127,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _startNetworkMonitoring();
     _startBanListener();
     _loadUserData();
+
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _syncCooldownFromFirebase(user.uid);
+      _checkDailyRewardStatus(user.uid);
     }
     _setupPointsStream();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForUpdate();
     });
-    _controller =
-        AnimationController(duration: const Duration(seconds: 2), vsync: this);
+
+    _controller = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    );
     _animation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
     _controller.forward();
 
@@ -133,7 +169,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             },
             onAdFailedToLoad: (ad, error) {
               ad.dispose();
-              debugPrint('❌ AdMob Error: ${error.message}');
+              debugPrint('❌ AdMob HomeScreen Banner Error: ${error.message}');
             },
           ),
         )..load();
@@ -141,6 +177,56 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _initNotifications();
       }
     });
+  }
+
+  void _checkDailyRewardStatus(String uid) async {
+    try {
+      DateTime now = DateTime.now();
+      String todayStr = "${now.year}-${now.month}-${now.day}";
+
+      final userDocRef =
+          FirebaseFirestore.instance.collection('users').doc(uid);
+      final doc = await userDocRef.get();
+
+      if (doc.exists && doc.data() != null) {
+        var data = doc.data()!;
+
+        if (data.containsKey('last_security_timestamp')) {
+          Timestamp lastSecurity = data['last_security_timestamp'];
+          DateTime lastSecurityDate = lastSecurity.toDate();
+
+          if (now.isBefore(lastSecurityDate)) {
+            if (mounted) {
+              setState(() {
+                _canClaimDaily = false;
+              });
+            }
+            return;
+          }
+        }
+
+        await userDocRef.set({
+          'last_security_timestamp': Timestamp.fromDate(now),
+        }, SetOptions(merge: true));
+
+        if (data.containsKey('last_claim_date_str') &&
+            data['last_claim_date_str'] != null) {
+          String lastClaimStr = data['last_claim_date_str'];
+          if (mounted) {
+            setState(() {
+              _canClaimDaily = lastClaimStr != todayStr;
+            });
+          }
+          return;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _canClaimDaily = true;
+        });
+      }
+    } catch (_) {}
   }
 
   void _checkForUpdate() async {
@@ -189,9 +275,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10))),
+                  backgroundColor: Colors.amber,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
                 onPressed: () async {
                   AdManager.showSmartAd();
                   final Uri uri = Uri.parse(url);
@@ -223,6 +310,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             totalPoints = (snapshot.data())?['points'] ?? 0;
           });
         }
+      }, onError: (error) {
+        debugPrint("📡 Stream Error: $error");
       });
     }
   }
@@ -235,7 +324,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             .collection('users')
             .doc(user.uid)
             .get();
+
         if (!mounted) return;
+
         if (userDoc.exists) {
           setState(() {
             totalPoints =
@@ -251,8 +342,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  StreamSubscription? _networkSubscription;
-
   void _startNetworkMonitoring() {
     _networkSubscription = Connectivity()
         .onConnectivityChanged
@@ -261,6 +350,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           .collection('app_settings')
           .doc('config')
           .get();
+
       bool isProtectionEnabled =
           configDoc.data()?['is_vpn_protection_enabled'] ?? true;
 
@@ -274,6 +364,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _showVpnBlocker() {
     if (!mounted) return;
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -283,9 +374,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           backgroundColor: const Color(0xFF1A1A2E),
           title:
               const Icon(Icons.security_rounded, color: Colors.red, size: 50),
-          content: Text(tr('close_vpn'),
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white)),
+          content: Text(
+            tr('close_vpn'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white),
+          ),
           actions: [
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -308,18 +401,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  @override
-  void dispose() {
-    _banListener?.cancel();
-    _unityTimer?.cancel();
-    _admobTimer?.cancel();
-    _controller.dispose();
-    _tabController.dispose();
-    _adMobBanner?.dispose();
-    _networkSubscription?.cancel();
-    super.dispose();
-  }
-
   void _runTimer(String server, int remaining) {
     if (server == "unity") {
       _unitySecondsLeft = remaining;
@@ -329,6 +410,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           timer.cancel();
           return;
         }
+
         if (_unitySecondsLeft > 0) {
           setState(() => _unitySecondsLeft--);
         } else {
@@ -344,6 +426,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           timer.cancel();
           return;
         }
+
         if (_admobSecondsLeft > 0) {
           setState(() => _admobSecondsLeft--);
         } else {
@@ -357,11 +440,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _startCooldownWithFirebase(
       String server, String uid, int duration) async {
     DateTime endTime = DateTime.now().add(Duration(seconds: duration));
+
     await FirebaseFirestore.instance.collection('users').doc(uid).set({
       '${server}_cooldown_until': Timestamp.fromDate(endTime),
       'login_lock_until':
           Timestamp.fromDate(DateTime.now().add(const Duration(hours: 1))),
     }, SetOptions(merge: true));
+
     _runTimer(server, duration);
   }
 
@@ -387,13 +472,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _showSuccessSnackBar(String message) {
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Row(children: [
-          const Icon(Icons.check_circle, color: Colors.white),
-          const SizedBox(width: 10),
-          Expanded(child: Text(message, style: const TextStyle(fontSize: 16)))
-        ]),
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Text(message, style: const TextStyle(fontSize: 16))),
+          ],
+        ),
         backgroundColor: Colors.green.shade700,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -409,12 +498,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         return AlertDialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Row(children: [
-            const FaIcon(FontAwesomeIcons.circleExclamation,
-                color: Colors.orange),
-            const SizedBox(width: 10),
-            Text(tr('limit_reached_title'))
-          ]),
+          title: Row(
+            children: [
+              const FaIcon(FontAwesomeIcons.circleExclamation,
+                  color: Colors.orange),
+              const SizedBox(width: 10),
+              Text(tr('limit_reached_title')),
+            ],
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -423,12 +514,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10)),
-                child: Text(tr('limit_reached_reset'),
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, color: Colors.orange),
-                    textAlign: TextAlign.center),
+                  color: Colors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  tr('limit_reached_reset'),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.orange),
+                  textAlign: TextAlign.center,
+                ),
               ),
             ],
           ),
@@ -466,6 +560,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _isAdProcessing = true;
       _isWaiting = true;
     });
+
     _startWaitingTimer();
 
     if (server == "unity") {
@@ -478,6 +573,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               'timestamp': FieldValue.serverTimestamp(),
               'status': 'pending',
             });
+
             if (mounted) {
               _startCooldownWithFirebase(
                   "unity", FirebaseAuth.instance.currentUser!.uid, cooldown);
@@ -514,6 +610,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               'timestamp': FieldValue.serverTimestamp(),
               'status': 'pending',
             });
+
             if (mounted) {
               _startCooldownWithFirebase(
                   "admob", FirebaseAuth.instance.currentUser!.uid, cooldown);
@@ -543,10 +640,221 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  Widget _buildVideoTab(int unityRemaining, int admobRemaining,
+      int cooldownSeconds, int unityPoints, int admobPoints) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildVideoServerCard(
+          title: tr('unity_ad'),
+          sub: _unitySecondsLeft > 0
+              ? "${tr('wait')} ${_formatTime(_unitySecondsLeft)}"
+              : tr('video_ad_sub'),
+          points: unityPoints,
+          icon: FontAwesomeIcons.unity,
+          remaining: unityRemaining,
+          isPremium: true,
+          onTap: () {
+            if (_unitySecondsLeft > 0 || _isWaiting || unityRemaining <= 0) {
+              if (unityRemaining <= 0) _showLimitReachedDialog();
+              return;
+            }
+            setState(() => _isWaiting = true);
+            _handleAdSelection(server: "unity", cooldown: cooldownSeconds);
+          },
+        ),
+        const SizedBox(height: 20),
+        _buildVideoServerCard(
+          title: tr('admob_ad'),
+          sub: _admobSecondsLeft > 0
+              ? "${tr('wait')} ${_formatTime(_admobSecondsLeft)}"
+              : tr('video_ad_sub'),
+          points: admobPoints,
+          icon: FontAwesomeIcons.google,
+          remaining: admobRemaining,
+          isPremium: false,
+          onTap: () {
+            if (_admobSecondsLeft > 0 || _isWaiting || admobRemaining <= 0) {
+              if (admobRemaining <= 0) _showLimitReachedDialog();
+              return;
+            }
+            setState(() => _isWaiting = true);
+            _handleAdSelection(server: "admob", cooldown: cooldownSeconds);
+          },
+        ),
+        const SizedBox(height: 80),
+      ],
+    );
+  }
+
+  Widget _buildVideoServerCard({
+    required String title,
+    required String sub,
+    required int points,
+    required dynamic icon,
+    required VoidCallback onTap,
+    required int remaining,
+    bool isPremium = false,
+  }) {
+    return Card(
+      color: const Color(0xFF1E1E2E),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: isPremium
+              ? Colors.amber.withValues(alpha: 0.3)
+              : Colors.cyanAccent.withValues(alpha: 0.3),
+        ),
+      ),
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+        leading: ShaderMask(
+          shaderCallback: (Rect bounds) => LinearGradient(
+            colors: isPremium
+                ? [Colors.amber, Colors.orangeAccent]
+                : [Colors.blueAccent, Colors.cyanAccent],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ).createShader(bounds),
+          child: FaIcon(icon as FaIconData?, color: Colors.white, size: 42),
+        ),
+        title: Text(title,
+            style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 20)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 5),
+            Text(sub,
+                style: const TextStyle(color: Colors.white70, fontSize: 16)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: remaining > 0
+                    ? Colors.green.withValues(alpha: 0.2)
+                    : Colors.red.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(
+                "${tr('remaining')}: $remaining",
+                style: TextStyle(
+                  color: remaining > 0 ? Colors.greenAccent : Colors.redAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+        trailing: Text(
+          "+$points",
+          style: const TextStyle(
+              color: Colors.greenAccent,
+              fontWeight: FontWeight.w900,
+              fontSize: 18),
+        ),
+        onTap: remaining > 0 ? onTap : null,
+      ),
+    );
+  }
+
+  Widget _buildTaskCard(
+      String title, String sub, int pts, IconData icon, VoidCallback action,
+      {bool isPremium = false}) {
+    return Card(
+      color: const Color(0xFF1E1E2E),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color:
+              isPremium ? Colors.amber.withValues(alpha: 0.5) : Colors.white10,
+        ),
+      ),
+      elevation: 4,
+      margin: const EdgeInsets.only(bottom: 15),
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        leading: ShaderMask(
+          shaderCallback: (Rect bounds) => LinearGradient(
+            colors: isPremium
+                ? [Colors.amber, Colors.orangeAccent, Colors.yellowAccent]
+                : [Colors.blueAccent, Colors.cyanAccent],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ).createShader(bounds),
+          child: Icon(icon, color: Colors.white, size: 38),
+        ),
+        title: Text(title,
+            style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                letterSpacing: 0.5)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 5),
+          child: Text(sub,
+              style: const TextStyle(
+                  color: Colors.white70, fontSize: 14, height: 1.3)),
+        ),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.greenAccent.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(12),
+            border:
+                Border.all(color: Colors.greenAccent.withValues(alpha: 0.3)),
+          ),
+          child: Text("+$pts",
+              style: const TextStyle(
+                  color: Colors.greenAccent,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 17)),
+        ),
+        onTap: action,
+      ),
+    );
+  }
+
+  void _initNotifications() {
+    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    flutterLocalNotificationsPlugin.initialize(
+        settings: const InitializationSettings(android: android));
+  }
+
+  Future<void> _sendTimeNotification(String messageKey) async {
+    const android = AndroidNotificationDetails(
+      'reward_timer_id',
+      'تنبيهات الأرباح',
+      importance: Importance.max,
+      priority: Priority.high,
+      color: Color(0xFF4527A0),
+      icon: '@mipmap/ic_launcher',
+    );
+
+    int notificationId = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await flutterLocalNotificationsPlugin.show(
+      id: notificationId,
+      title: tr('notification_reward_title'),
+      body: tr(messageKey),
+      notificationDetails: const NotificationDetails(android: android),
+    );
+  }
+
   String _formatTime(int seconds) {
     int minutes = seconds ~/ 60;
     int remainingSeconds = seconds % 60;
     return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    return "${twoDigits(duration.inHours)}:${twoDigits(duration.inMinutes.remainder(60))}:${twoDigits(duration.inSeconds.remainder(60))}";
   }
 
   void _startWaitingTimer() {
@@ -554,11 +862,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() {
       _isWaiting = true;
     });
+
     Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
       }
+
       if (_secondsRemaining > 0) {
         setState(() {
           _secondsRemaining--;
@@ -573,9 +883,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _showErrorSnackBar(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message, style: const TextStyle(color: Colors.white)),
+        content: Text(message,
+            style: const TextStyle(color: Colors.white, fontSize: 14)),
         backgroundColor: Colors.red.shade700,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -589,7 +901,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // 📱 وقت الجهاز الحالي الذي قد يكون تم التلاعب به
       DateTime now = DateTime.now();
       String todayStr = "${now.year}-${now.month}-${now.day}";
 
@@ -597,6 +908,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           .collection('users')
           .doc(user.uid)
           .get();
+
       int currentStreak = 0;
       bool canClaim = true;
       Duration remainingTime = Duration.zero;
@@ -609,14 +921,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           currentStreak = 0;
         }
 
-        // 🚨 1. كشف التلاعب بالوقت (الحماية الأساسية)
-        // نتحقق من آخر وقت تم تسجيله في السيرفر لأي نشاط (دخول أو مكافأة)
         if (data.containsKey('last_security_timestamp')) {
           Timestamp lastSecurityTimestamp = data['last_security_timestamp'];
           DateTime lastSecurityDate = lastSecurityTimestamp.toDate();
 
-          // إذا كان وقت الهاتف الحالي "قبل" أو "يساوي" وقت آخر عملية حقيقية تم حفظها
-          // فهذا يعني بنسبة 100% أن المستخدم قام بتغيير وقت الهاتف للخلف أو يتلاعب بالوقت
           if (now.isBefore(lastSecurityDate) ||
               now.isAtSameMomentAs(lastSecurityDate)) {
             _showErrorSnackBar(
@@ -625,7 +933,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           }
         }
 
-        // 🚨 2. فحص هل قام المستخدم بتقديم الوقت ليوم مستقبلي للحصول على مكافأة متكررة؟
         if (data.containsKey('last_claim_date_str') &&
             data['last_claim_date_str'] != null) {
           String lastClaimStr = data['last_claim_date_str'];
@@ -639,8 +946,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
       }
 
-      if (!mounted) return;
-      _showRewardDialog(user.uid, currentStreak, canClaim, remainingTime);
+      if (mounted) {
+        _showRewardDialog(user.uid, currentStreak, canClaim, remainingTime);
+      }
     } catch (e) {
       _showErrorSnackBar(
           "فشل الاتصال، يرجى التحقق من استقرار الشبكة والمحاولة مجدداً");
@@ -654,21 +962,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     try {
       DateTime now = DateTime.now();
       String todayStr = "${now.year}-${now.month}-${now.day}";
+
       int nextStreak = (currentStreak >= 6) ? 0 : currentStreak + 1;
 
-      // تحديث البيانات وحفظ طابع زمني أمني صارم (last_security_timestamp)
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'points': FieldValue.increment(rewardAmount),
         'streak_count': nextStreak,
         'last_claim_date_str': todayStr,
         'last_daily_claim': Timestamp.fromDate(now),
-        'last_security_timestamp':
-            Timestamp.fromDate(now), // 👈 الطابع الأمني الأساسي
+        'last_security_timestamp': Timestamp.fromDate(now),
         'points_history': FieldValue.arrayUnion([
           {
             'type': 'daily_reward_claim',
             'amount': rewardAmount,
-            'timestamp': now.toIso8601String()
+            'timestamp': now.toIso8601String(),
           }
         ])
       });
@@ -677,66 +984,781 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
       if (!mounted) return;
       HapticFeedback.mediumImpact();
-      scaffoldMessenger.showSnackBar(SnackBar(
+
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
           content: Text(tr('reward_processing_msg')),
           backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating));
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } catch (e) {
-      _showErrorSnackBar("تعذر حفظ الجائزة، تأكد من جودة اتصالك بالإنترنت");
+      if (!mounted) return;
+      _showErrorSnackBar(tr('withdraw_error'));
     }
   }
 
-  void _checkDailyRewardStatus(String uid) async {
-    try {
-      DateTime now = DateTime.now();
-      String todayStr = "${now.year}-${now.month}-${now.day}";
+  void _showRewardDialog(
+      String uid, int streak, bool canClaim, Duration remaining) {
+    Duration liveRemaining = remaining;
+    Timer? timer;
 
-      final userDocRef =
-          FirebaseFirestore.instance.collection('users').doc(uid);
-      final doc = await userDocRef.get();
-
-      if (doc.exists && doc.data() != null) {
-        var data = doc.data()!;
-
-        // 🛡️ فحص الأمان المستمر عند فتح التطبيق
-        if (data.containsKey('last_security_timestamp')) {
-          Timestamp lastSecurity = data['last_security_timestamp'];
-          DateTime lastSecurityDate = lastSecurity.toDate();
-
-          // إذا فتح التطبيق بوقت "أقدم" من آخر وقت مسجل حقيقي
-          if (now.isBefore(lastSecurityDate)) {
-            // نقوم بقفل واجهة المكافأة تلقائياً لحمايتك
-            if (mounted) {
-              setState(() {
-                _canClaimDaily = false;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            if (!canClaim && timer == null) {
+              timer = Timer.periodic(const Duration(seconds: 1), (t) {
+                if (liveRemaining.inSeconds > 0) {
+                  if (context.mounted) {
+                    setDialogState(() {
+                      liveRemaining =
+                          liveRemaining - const Duration(seconds: 1);
+                    });
+                  }
+                } else {
+                  if (context.mounted) {
+                    setDialogState(() {
+                      canClaim = true;
+                    });
+                  }
+                  t.cancel();
+                }
               });
             }
-            return;
-          }
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1A1A2E),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: Colors.amber.withValues(alpha: 0.3)),
+              ),
+              title: Text(tr('daily_streak'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(canClaim ? Icons.card_giftcard : Icons.timer_outlined,
+                        color: Colors.amber, size: 50),
+                    const SizedBox(height: 10),
+                    Text(
+                        canClaim
+                            ? tr('daily_reward_ready')
+                            : tr('next_reward_in'),
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 14)),
+                    const SizedBox(height: 8),
+                    Text(
+                      canClaim
+                          ? "${10 + (streak * 5)} ${tr('points')}"
+                          : _formatDuration(liveRemaining),
+                      style: const TextStyle(
+                          color: Colors.amber,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace'),
+                    ),
+                    const SizedBox(height: 15),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: List.generate(7, (index) {
+                          bool isPast = index < streak;
+                          bool isCurrent = index == streak;
+                          return Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: isCurrent
+                                  ? Colors.amber
+                                  : (isPast
+                                      ? Colors.green.withValues(alpha: 0.4)
+                                      : Colors.white10),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Column(
+                              children: [
+                                Text("${tr('day')} ${index + 1}",
+                                    style: TextStyle(
+                                        color: isCurrent
+                                            ? Colors.black
+                                            : Colors.white60,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold)),
+                                Text("${10 + (index * 5)}",
+                                    style: TextStyle(
+                                        color: isCurrent
+                                            ? Colors.black
+                                            : Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12)),
+                              ],
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                Center(
+                  child: canClaim
+                      ? ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.amber,
+                              foregroundColor: Colors.black,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12))),
+                          onPressed: () async {
+                            AdManager.showSmartAd();
+                            timer?.cancel();
+                            Navigator.pop(ctx);
+
+                            if (!mounted) return;
+                            int rewardAmount = 10 + (streak * 5);
+                            await _processDailyReward(
+                                uid, rewardAmount, streak);
+                          },
+                          child: Text(tr('claim_reward_now')),
+                        )
+                      : TextButton(
+                          onPressed: () {
+                            AdManager.showSmartAd();
+                            timer?.cancel();
+                            Navigator.pop(ctx);
+                          },
+                          child: Text(tr('close'),
+                              style: const TextStyle(color: Colors.white54)),
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ).then((_) => timer?.cancel());
+  }
+
+  Widget _buildMaintenanceScreen(String message) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF4527A0), Colors.black],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.build_circle_rounded,
+                size: 80, color: Colors.amber),
+            const SizedBox(height: 20),
+            Text(
+              tr('maintenance_title'),
+              style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white),
+            ),
+            const SizedBox(height: 15),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 30),
+              child: Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 16, color: Colors.white70, height: 1.5),
+              ),
+            ),
+            const SizedBox(height: 40),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () {
+                AdManager.showSmartAd();
+              },
+              child: Text(tr('waiting_update'),
+                  style: const TextStyle(color: Colors.black)),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(String? uid, int exchangeRate) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    double rate = exchangeRate > 0 ? exchangeRate.toDouble() : 1000.0;
+    double dollarValue = totalPoints / rate;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 15),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu_rounded, size: 34),
+                  color:
+                      themeProvider.isDarkMode ? Colors.amber : Colors.black87,
+                  onPressed: () {
+                    AdManager.showSmartAd();
+                    Scaffold.of(context).openDrawer();
+                  },
+                ),
+              ),
+              const SizedBox(width: 2),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        "Syria Earn",
+                        style: TextStyle(
+                          fontSize: 25,
+                          fontWeight: FontWeight.w900,
+                          color: themeProvider.isDarkMode
+                              ? Colors.white
+                              : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildSmallActionIcon(
+                        icon: Icons.language,
+                        color: themeProvider.isDarkMode
+                            ? Colors.amber.withValues(alpha: 0.9)
+                            : Colors.black54,
+                        onPressed: () {
+                          AdManager.showSmartAd();
+                        },
+                        isPopup: true,
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                  ),
+                  Container(
+                    height: 4,
+                    width: 60,
+                    decoration: BoxDecoration(
+                      color: Colors.amber,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          InkWell(
+            onTap: () => _navigateToWithdraw(uid),
+            borderRadius: BorderRadius.circular(15),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: Colors.amber.withValues(alpha: 0.3), width: 1.5),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.account_balance_wallet_rounded,
+                    color: Colors.amber,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text("$totalPoints",
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 17,
+                              color: Colors.amber)),
+                      Text("\$${dollarValue.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.greenAccent,
+                              fontWeight: FontWeight.w700)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPointsDisplay(String? uid, int exchangeRate) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream:
+          FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const CircularProgressIndicator(color: Colors.amber);
         }
 
-        // 🔄 تحديث طابع الأمان بشكل مستمر مع كل دخله طبيعية للتطبيق لنسد عليه خط الرجوع
-        await userDocRef.set({
-          'last_security_timestamp': Timestamp.fromDate(now),
-        }, SetOptions(merge: true));
+        var data = snap.data?.data() as Map<String, dynamic>?;
+        int points = (data?['points'] ?? 0).toInt();
 
-        if (data.containsKey('last_claim_date_str') &&
-            data['last_claim_date_str'] != null) {
-          String lastClaimStr = data['last_claim_date_str'];
-          if (mounted) {
-            setState(() {
-              _canClaimDaily = lastClaimStr != todayStr;
+        return StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('app_settings')
+              .doc('config')
+              .snapshots(),
+          builder: (context, configSnap) {
+            final config =
+                configSnap.data?.data() as Map<String, dynamic>? ?? {};
+            int exchangeRate = config['exchange_rate'] ?? 1000;
+            double dollarValue = points / exchangeRate;
+
+            return Column(
+              children: [
+                Text(
+                  "$points",
+                  style: const TextStyle(
+                      color: Colors.amber,
+                      fontSize: 60,
+                      fontWeight: FontWeight.bold,
+                      shadows: [Shadow(color: Colors.black45, blurRadius: 10)]),
+                ),
+                Text(
+                  "≈ \$${dollarValue.toStringAsFixed(2)}",
+                  style: TextStyle(
+                      color: Colors.greenAccent.withValues(alpha: 0.8),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 15),
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('global_notifications')
+                      .orderBy('timestamp', descending: true)
+                      .limit(1)
+                      .snapshots(),
+                  builder: (context, notifSnap) {
+                    if (!notifSnap.hasData || notifSnap.data!.docs.isEmpty) {
+                      return const SizedBox(height: 40);
+                    }
+
+                    var notifData = notifSnap.data!.docs.first.data()
+                        as Map<String, dynamic>;
+                    String lang = context.locale.languageCode;
+                    String message = notifData['message_$lang'] ??
+                        notifData['message_en'] ??
+                        "";
+
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 20),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 15, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.greenAccent.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: Colors.greenAccent.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.verified,
+                              color: Colors.greenAccent, size: 18),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              message,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildOffersTab(bool hasRated) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(15),
+      child: Column(
+        children: [
+          _buildTaskCard(
+            tr('earn_points_offers'),
+            tr('offers_wall_sub'),
+            500,
+            Icons.local_fire_department_rounded,
+            () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (context) => const OffersWallWidget()),
+              );
+            },
+            isPremium: true,
+          ),
+          const SizedBox(height: 12),
+          _buildTaskCard(
+            hasRated ? tr('rated_thanks') : tr('rate_app_title'),
+            hasRated ? "" : tr('rate_app_sub'),
+            25,
+            Icons.stars_rounded,
+            hasRated
+                ? () {}
+                : () async {
+                    const String url =
+                        "https://play.google.com/store/apps/details?id=com.mohamad.syria_earn";
+                    final Uri uri = Uri.parse(url);
+                    try {
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri,
+                            mode: LaunchMode.externalApplication);
+                        if (mounted) {
+                          _showFakeVerificationDialog();
+                        }
+                      }
+                    } catch (e) {
+                      debugPrint("Error: $e");
+                      if (mounted) _showErrorSnackBar(tr('error_occurred'));
+                    }
+                  },
+            isPremium: !hasRated,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFakeVerificationDialog() {
+    int countdown = 60;
+    Timer? timer;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            timer ??= Timer.periodic(const Duration(seconds: 1), (t) {
+              if (countdown > 0) {
+                if (mounted) setDialogState(() => countdown--);
+              } else {
+                t.cancel();
+                _finalizeRatingPoints(ctx);
+              }
             });
+
+            return PopScope(
+              canPop: false,
+              onPopInvokedWithResult: (didPop, result) {
+                if (didPop) return;
+              },
+              child: AlertDialog(
+                backgroundColor: const Color(0xFF1A1A2E),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: const BorderSide(color: Colors.amber, width: 1),
+                ),
+                title: Row(
+                  children: [
+                    const Icon(Icons.verified_user_rounded,
+                        color: Colors.amber),
+                    const SizedBox(width: 10),
+                    Text(
+                      tr('verifying'),
+                      style: const TextStyle(color: Colors.white, fontSize: 18),
+                    ),
+                  ],
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(color: Colors.amber),
+                    const SizedBox(height: 25),
+                    Text(
+                      tr('verifying_desc'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 14, height: 1.5),
+                    ),
+                    const SizedBox(height: 15),
+                    InkWell(
+                      onTap: () async {
+                        const String url =
+                            "https://play.google.com/store/apps/details?id=com.mohamad.syria_earn";
+                        final Uri uri = Uri.parse(url);
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri,
+                              mode: LaunchMode.externalApplication);
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: Text(
+                          tr('click_here_to_rate'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.blueAccent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      "00:${countdown.toString().padLeft(2, '0')}",
+                      style: const TextStyle(
+                        color: Colors.amber,
+                        fontSize: 40,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+                    Text(
+                      tr('verifying_points_hint'),
+                      style: const TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ).then((_) => timer?.cancel());
+  }
+
+  void _finalizeRatingPoints(BuildContext dialogContext) async {
+    String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    if (uid.isEmpty) return;
+
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'has_rated_app': true,
+        'points': FieldValue.increment(25),
+        'points_history': FieldValue.arrayUnion([
+          {
+            'type': 'rate_app_bonus',
+            'amount': 25,
+            'timestamp': DateTime.now().toIso8601String(),
           }
-          return;
-        }
+        ])
+      });
+
+      if (!mounted) return;
+
+      if (dialogContext.mounted) {
+        Navigator.pop(dialogContext);
       }
-      if (mounted) {
-        setState(() {
-          _canClaimDaily = true;
-        });
+
+      _showSuccessSnackBar("${tr('success_rate')} 25 ${tr('points')}");
+    } catch (e) {
+      debugPrint("Error finalizing points: $e");
+      if (mounted && dialogContext.mounted) {
+        Navigator.pop(dialogContext);
+        _showErrorSnackBar(tr('error_occurred'));
       }
-    } catch (_) {}
+    }
+  }
+
+  Widget _buildAppDrawer(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    return Drawer(
+      backgroundColor: const Color(0xFF1A1A2E),
+      child: Column(
+        children: [
+          UserAccountsDrawerHeader(
+            decoration: const BoxDecoration(color: Colors.amber),
+            currentAccountPicture: CircleAvatar(
+              backgroundColor: const Color(0xFF1A1A2E),
+              backgroundImage:
+                  user?.photoURL != null ? NetworkImage(user!.photoURL!) : null,
+              child: user?.photoURL == null
+                  ? const Icon(Icons.person, size: 45, color: Colors.amber)
+                  : null,
+            ),
+            accountName: Text(
+              user?.displayName ?? tr('user_name_placeholder'),
+              style: const TextStyle(
+                  color: Color(0xFF1A1A2E), fontWeight: FontWeight.bold),
+            ),
+            accountEmail: Text(user?.email ?? "",
+                style: const TextStyle(color: Color(0xFF1A1A2E), fontSize: 12)),
+          ),
+          _drawerItem(
+            icon: Icons.card_giftcard_rounded,
+            title: tr('daily_reward'),
+            subtitle:
+                _canClaimDaily ? tr('reward_available') : tr('reward_claimed'),
+            onTap: () {
+              Navigator.pop(context);
+              _claimDailyReward();
+            },
+            showBadge: _canClaimDaily,
+          ),
+          const Divider(color: Colors.white10, indent: 20, endIndent: 20),
+          _drawerItem(
+            icon: Icons.history_rounded,
+            title: tr('points_history'),
+            subtitle: tr('points_history_desc'),
+            onTap: () {
+              Navigator.pop(context);
+              _navigateToHistory();
+            },
+          ),
+          _drawerItem(
+            icon: Icons.emoji_events_outlined,
+            title: tr('leaderboard_title'),
+            subtitle: tr('leaderboard_desc'),
+            onTap: () {
+              Navigator.pop(context);
+              _navigateToLeaderboard();
+            },
+          ),
+          _drawerItem(
+            icon: Icons.settings_suggest_outlined,
+            title: tr('settings_title'),
+            subtitle: tr('settings_desc'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.pushNamed(context, '/settings');
+            },
+          ),
+          const Spacer(),
+          _drawerItem(
+            icon: Icons.logout_rounded,
+            title: tr('logout_title'),
+            subtitle: tr('logout_desc'),
+            onTap: () async {
+              await FirebaseAuth.instance.signOut();
+              if (context.mounted) {
+                Navigator.pushReplacementNamed(context, '/login');
+              }
+            },
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSmallActionIcon({
+    required IconData icon,
+    required Color color,
+    required VoidCallback onPressed,
+    bool isPopup = false,
+  }) {
+    return isPopup
+        ? PopupMenuButton<String>(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: Icon(icon, size: 24, color: color),
+            onSelected: (String langCode) async {
+              await EasyLocalization.of(context)?.setLocale(Locale(langCode));
+              if (mounted) setState(() {});
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'ar', child: Text("العربية")),
+              const PopupMenuItem(value: 'en', child: Text("English")),
+              const PopupMenuItem(value: 'es', child: Text("Español")),
+              const PopupMenuItem(value: 'tr', child: Text("Türkçe")),
+              const PopupMenuItem(value: 'hi', child: Text("हिन्दी")),
+            ],
+          )
+        : IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: Icon(icon, size: 24, color: color),
+            onPressed: () {
+              AdManager.showSmartAd();
+              onPressed();
+            },
+          );
+  }
+
+  Widget _drawerItem({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    bool showBadge = false,
+  }) {
+    return ListTile(
+      leading: Stack(
+        children: [
+          Icon(icon, color: Colors.amber, size: 28),
+          if (showBadge)
+            Positioned(
+              right: 0,
+              top: 0,
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                  border:
+                      Border.all(color: const Color(0xFF1A1A2E), width: 1.5),
+                ),
+              ),
+            ),
+        ],
+      ),
+      title: Text(title,
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.w600)),
+      subtitle: Text(subtitle,
+          style: const TextStyle(color: Colors.white54, fontSize: 11)),
+      onTap: onTap,
+    );
+  }
+
+  @override
+  void dispose() {
+    _banListener?.cancel();
+    _unityTimer?.cancel();
+    _admobTimer?.cancel();
+    _controller.dispose();
+    _tabController.dispose();
+    _adMobBanner?.dispose();
+
+    // إلغاء الاستماع لحالة الشبكة واستخدام المتغير برمجياً لحل تحذير الـ Linter
+    _networkSubscription?.cancel();
+
+    super.dispose();
   }
 
   @override
@@ -781,6 +1803,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             final int cooldownSeconds = config['video_cooldown_seconds'] ?? 300;
             final int unityDailyLimit = config['unity_daily_limit'] ?? 20;
             final int admobDailyLimit = config['admob_daily_limit'] ?? 20;
+
             final int currentExchangeRate = config['exchange_rate'] ?? 1000;
             final bool isUnderMaintenance =
                 config['under_maintenance'] ?? false;
@@ -865,45 +1888,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               SingleChildScrollView(
                                 padding: const EdgeInsets.symmetric(
                                     vertical: 20, horizontal: 15),
-                                child: VideosTabScreen(
-                                  unityRemaining: unityRemaining,
-                                  admobRemaining: admobRemaining,
-                                  unitySecondsLeft: _unitySecondsLeft,
-                                  admobSecondsLeft: _admobSecondsLeft,
-                                  unityPoints: unitypoints,
-                                  admobPoints: admobpoints,
-                                  isWaiting: _isWaiting,
-                                  onUnityTap: () {
-                                    if (_unitySecondsLeft > 0 ||
-                                        _isWaiting ||
-                                        unityRemaining <= 0) {
-                                      if (unityRemaining <= 0) {
-                                        _showLimitReachedDialog();
-                                      }
-                                      return;
-                                    }
-                                    setState(() => _isWaiting = true);
-                                    _handleAdSelection(
-                                        server: "unity",
-                                        cooldown: cooldownSeconds);
-                                  },
-                                  onAdMobTap: () {
-                                    if (_admobSecondsLeft > 0 ||
-                                        _isWaiting ||
-                                        admobRemaining <= 0) {
-                                      if (admobRemaining <= 0) {
-                                        _showLimitReachedDialog();
-                                      }
-                                      return;
-                                    }
-                                    setState(() => _isWaiting = true);
-                                    _handleAdSelection(
-                                        server: "admob",
-                                        cooldown: cooldownSeconds);
-                                  },
-                                ),
+                                child: _buildVideoTab(
+                                    unityRemaining,
+                                    admobRemaining,
+                                    cooldownSeconds,
+                                    unitypoints,
+                                    admobpoints),
                               ),
-                              OffersTabScreen(hasRated: hasRated),
+                              _buildOffersTab(hasRated),
                             ],
                           ),
                         ),
@@ -911,567 +1903,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   ),
                 ),
+                bottomNavigationBar: (!isAdmin)
+                    ? Container(
+                        width: double.infinity,
+                        height: 50,
+                        alignment: Alignment.center,
+                        child: AdManager.smartBanner(_adMobBanner),
+                      )
+                    : null,
               ),
             );
           },
         );
       },
     );
-  }
-
-  Widget _buildMaintenanceScreen(String message) {
-    return Scaffold(
-      body: Container(
-        width: double.infinity,
-        decoration: const BoxDecoration(
-            gradient: LinearGradient(
-                colors: [Color(0xFF4527A0), Colors.black],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter)),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.build_circle_rounded,
-                size: 80, color: Colors.amber),
-            const SizedBox(height: 20),
-            Text(tr('maintenance_title'),
-                style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white)),
-            const SizedBox(height: 15),
-            Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 30),
-                child: Text(message,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 16, color: Colors.white70, height: 1.5))),
-            const SizedBox(height: 40),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.amber,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10))),
-              onPressed: () {
-                AdManager.showSmartAd();
-              },
-              child: Text(tr('waiting_update'),
-                  style: const TextStyle(color: Colors.black)),
-            )
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader(String? uid, int exchangeRate) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
-    double rate = exchangeRate > 0 ? exchangeRate.toDouble() : 1000.0;
-    double dollarValue = totalPoints / rate;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 15),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Builder(
-                builder: (context) => IconButton(
-                  icon: const Icon(Icons.menu_rounded, size: 34),
-                  color:
-                      themeProvider.isDarkMode ? Colors.amber : Colors.black87,
-                  onPressed: () {
-                    AdManager.showSmartAd();
-                    Scaffold.of(context).openDrawer();
-                  },
-                ),
-              ),
-              const SizedBox(width: 2),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text("Syria Earn",
-                          style: TextStyle(
-                              fontSize: 25,
-                              fontWeight: FontWeight.w900,
-                              color: themeProvider.isDarkMode
-                                  ? Colors.white
-                                  : Colors.black87)),
-                      const SizedBox(width: 8),
-                      _buildSmallActionIcon(
-                        icon: Icons.language,
-                        color: themeProvider.isDarkMode
-                            ? Colors.amber.withValues(alpha: 0.9)
-                            : Colors.black54,
-                        onPressed: () {
-                          AdManager.showSmartAd();
-                        },
-                        isPopup: true,
-                      ),
-                      const SizedBox(width: 10),
-                    ],
-                  ),
-                  Container(
-                      height: 4,
-                      width: 60,
-                      decoration: BoxDecoration(
-                          color: Colors.amber,
-                          borderRadius: BorderRadius.circular(2))),
-                ],
-              ),
-            ],
-          ),
-          InkWell(
-            onTap: () => _navigateToWithdraw(uid),
-            borderRadius: BorderRadius.circular(15),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                  color: Colors.amber.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: Colors.amber.withValues(alpha: 0.3), width: 1.5)),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.account_balance_wallet_rounded,
-                      color: Colors.amber, size: 22),
-                  const SizedBox(width: 8),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text("$totalPoints",
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 17,
-                              color: Colors.amber)),
-                      Text("\$${dollarValue.toStringAsFixed(2)}",
-                          style: const TextStyle(
-                              fontSize: 11,
-                              color: Colors.greenAccent,
-                              fontWeight: FontWeight.w700)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPointsDisplay(String? uid, int exchangeRate) {
-    return StreamBuilder<DocumentSnapshot>(
-      stream:
-          FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
-      builder: (context, snap) {
-        if (!snap.hasData) {
-          return const CircularProgressIndicator(color: Colors.amber);
-        }
-        var data = snap.data?.data() as Map<String, dynamic>?;
-        int points = (data?['points'] ?? 0).toInt();
-
-        return StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('app_settings')
-              .doc('config')
-              .snapshots(),
-          builder: (context, configSnap) {
-            final config =
-                configSnap.data?.data() as Map<String, dynamic>? ?? {};
-            int exchangeRate = config['exchange_rate'] ?? 1000;
-            double dollarValue = points / exchangeRate;
-
-            return Column(
-              children: [
-                Text("$points",
-                    style: const TextStyle(
-                        color: Colors.amber,
-                        fontSize: 60,
-                        fontWeight: FontWeight.bold,
-                        shadows: [
-                          Shadow(color: Colors.black45, blurRadius: 10)
-                        ])),
-                Text("≈ \$${dollarValue.toStringAsFixed(2)}",
-                    style: TextStyle(
-                        color: Colors.greenAccent.withValues(alpha: 0.8),
-                        fontSize: 18,
-                        fontWeight: FontWeight.w500)),
-                const SizedBox(height: 15),
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('global_notifications')
-                      .orderBy('timestamp', descending: true)
-                      .limit(1)
-                      .snapshots(),
-                  builder: (context, notifSnap) {
-                    if (!notifSnap.hasData || notifSnap.data!.docs.isEmpty) {
-                      return const SizedBox(height: 40);
-                    }
-                    var notifData = notifSnap.data!.docs.first.data()
-                        as Map<String, dynamic>;
-                    String lang = context.locale.languageCode;
-                    String message = notifData['message_$lang'] ??
-                        notifData['message_en'] ??
-                        "";
-
-                    return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 20),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 15, vertical: 8),
-                      decoration: BoxDecoration(
-                          color: Colors.greenAccent.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color:
-                                  Colors.greenAccent.withValues(alpha: 0.3))),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.verified,
-                              color: Colors.greenAccent, size: 18),
-                          const SizedBox(width: 8),
-                          Flexible(
-                              child: Text(message,
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600),
-                                  textAlign: TextAlign.center)),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _navigateToWithdraw(String? uid) {
-    AdManager.showSmartAd();
-    if (mounted) {
-      Navigator.push(
-          context, MaterialPageRoute(builder: (c) => const WithdrawScreen()));
-    }
-  }
-
-  void _navigateToLeaderboard() {
-    AdManager.showSmartAd();
-    Navigator.push(
-        context, MaterialPageRoute(builder: (c) => const LeaderboardScreen()));
-  }
-
-  void _initNotifications() {
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    flutterLocalNotificationsPlugin.initialize(
-        settings: const InitializationSettings(android: android));
-  }
-
-  Future<void> _sendTimeNotification(String messageKey) async {
-    const android = AndroidNotificationDetails(
-        'reward_timer_id', 'تنبيهات الأرباح',
-        importance: Importance.max,
-        priority: Priority.high,
-        color: Color(0xFF4527A0),
-        icon: '@mipmap/ic_launcher');
-    int notificationId = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    await flutterLocalNotificationsPlugin.show(
-        id: notificationId,
-        title: tr('notification_reward_title'),
-        body: tr(messageKey),
-        notificationDetails: const NotificationDetails(android: android));
-  }
-
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, "0");
-    return "${twoDigits(duration.inHours)}:${twoDigits(duration.inMinutes.remainder(60))}:${twoDigits(duration.inSeconds.remainder(60))}";
-  }
-
-  void _showRewardDialog(
-      String uid, int streak, bool canClaim, Duration remaining) {
-    Duration liveRemaining = remaining;
-    Timer? timer;
-
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            if (!canClaim && timer == null) {
-              timer = Timer.periodic(const Duration(seconds: 1), (t) {
-                if (liveRemaining.inSeconds > 0) {
-                  setDialogState(() {
-                    liveRemaining = liveRemaining - const Duration(seconds: 1);
-                  });
-                } else {
-                  setDialogState(() {
-                    canClaim = true;
-                  });
-                  t.cancel();
-                }
-              });
-            }
-
-            return AlertDialog(
-              backgroundColor: const Color(0xFF1A1A2E),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  side: BorderSide(color: Colors.amber.withValues(alpha: 0.3))),
-              title: Text(tr('daily_streak'),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(canClaim ? Icons.card_giftcard : Icons.timer_outlined,
-                        color: Colors.amber, size: 50),
-                    const SizedBox(height: 10),
-                    Text(
-                        canClaim
-                            ? tr('daily_reward_ready')
-                            : tr('next_reward_in'),
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 14)),
-                    const SizedBox(height: 8),
-                    Text(
-                        canClaim
-                            ? "${10 + (streak * 5)} ${tr('points')}"
-                            : _formatDuration(liveRemaining),
-                        style: const TextStyle(
-                            color: Colors.amber,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: 'monospace')),
-                    const SizedBox(height: 15),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: List.generate(7, (index) {
-                          bool isPast = index < streak;
-                          bool isCurrent = index == streak;
-                          return Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 4),
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                                color: isCurrent
-                                    ? Colors.amber
-                                    : (isPast
-                                        ? Colors.green.withValues(alpha: 0.4)
-                                        : Colors.white10),
-                                borderRadius: BorderRadius.circular(10)),
-                            child: Column(
-                              children: [
-                                Text("${tr('day')} ${index + 1}",
-                                    style: TextStyle(
-                                        color: isCurrent
-                                            ? Colors.black
-                                            : Colors.white60,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.bold)),
-                                Text("${10 + (index * 5)}",
-                                    style: TextStyle(
-                                        color: isCurrent
-                                            ? Colors.black
-                                            : Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12)),
-                              ],
-                            ),
-                          );
-                        }),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                Center(
-                  child: canClaim
-                      ? ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.amber,
-                              foregroundColor: Colors.black,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12))),
-                          onPressed: () async {
-                            AdManager.showSmartAd();
-                            timer?.cancel();
-                            Navigator.pop(ctx);
-
-                            if (!mounted) return;
-                            int rewardAmount = 10 + (streak * 5);
-
-                            // 🛠️ تم تملأ المعامل الثالث هنا لإرسال الـ streak الحالي للمكافأة
-                            await _processDailyReward(
-                                uid, rewardAmount, streak);
-                          },
-                          child: Text(tr('claim_reward_now')),
-                        )
-                      : TextButton(
-                          onPressed: () {
-                            AdManager.showSmartAd();
-                            timer?.cancel();
-                            Navigator.pop(ctx);
-                          },
-                          child: Text(tr('close'),
-                              style: const TextStyle(color: Colors.white54))),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    ).then((_) => timer?.cancel());
-  }
-
-  Widget _buildAppDrawer(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-
-    return Drawer(
-      backgroundColor: const Color(0xFF1A1A2E),
-      child: Column(
-        children: [
-          UserAccountsDrawerHeader(
-            decoration: const BoxDecoration(color: Colors.amber),
-            currentAccountPicture: CircleAvatar(
-              backgroundColor: const Color(0xFF1A1A2E),
-              backgroundImage:
-                  user?.photoURL != null ? NetworkImage(user!.photoURL!) : null,
-              child: user?.photoURL == null
-                  ? const Icon(Icons.person, size: 45, color: Colors.amber)
-                  : null,
-            ),
-            accountName: Text(user?.displayName ?? tr('user_name_placeholder'),
-                style: const TextStyle(
-                    color: Color(0xFF1A1A2E), fontWeight: FontWeight.bold)),
-            accountEmail: Text(user?.email ?? "",
-                style: const TextStyle(color: Color(0xFF1A1A2E), fontSize: 12)),
-          ),
-          _drawerItem(
-            icon: Icons.card_giftcard_rounded,
-            title: tr('daily_reward'),
-            subtitle:
-                _canClaimDaily ? tr('reward_available') : tr('reward_claimed'),
-            onTap: () {
-              Navigator.pop(context);
-              _claimDailyReward();
-            },
-            showBadge: _canClaimDaily,
-          ),
-          const Divider(color: Colors.white10, indent: 20, endIndent: 20),
-          _drawerItem(
-              icon: Icons.history_rounded,
-              title: tr('points_history'),
-              subtitle: tr('points_history_desc'),
-              onTap: () {
-                Navigator.pop(context);
-                _navigateToHistory();
-              }),
-          _drawerItem(
-              icon: Icons.emoji_events_outlined,
-              title: tr('leaderboard_title'),
-              subtitle: tr('leaderboard_desc'),
-              onTap: () {
-                Navigator.pop(context);
-                _navigateToLeaderboard();
-              }),
-          _drawerItem(
-              icon: Icons.settings_suggest_outlined,
-              title: tr('settings_title'),
-              subtitle: tr('settings_desc'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, '/settings');
-              }),
-          const Spacer(),
-          _drawerItem(
-              icon: Icons.logout_rounded,
-              title: tr('logout_title'),
-              subtitle: tr('logout_desc'),
-              onTap: () async {
-                await FirebaseAuth.instance.signOut();
-                if (context.mounted) {
-                  Navigator.pushReplacementNamed(context, '/login');
-                }
-              }),
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-
-  Widget _drawerItem(
-      {required IconData icon,
-      required String title,
-      required String subtitle,
-      required VoidCallback onTap,
-      bool showBadge = false}) {
-    return ListTile(
-      leading: Stack(
-        children: [
-          Icon(icon, color: Colors.amber, size: 28),
-          if (showBadge)
-            Positioned(
-                right: 0,
-                top: 0,
-                child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                            color: const Color(0xFF1A1A2E), width: 1.5)))),
-        ],
-      ),
-      title: Text(title,
-          style: const TextStyle(
-              color: Colors.white, fontWeight: FontWeight.w600)),
-      subtitle: Text(subtitle,
-          style: const TextStyle(color: Colors.white54, fontSize: 11)),
-      onTap: onTap,
-    );
-  }
-
-  Widget _buildSmallActionIcon(
-      {required IconData icon,
-      required Color color,
-      required VoidCallback onPressed,
-      bool isPopup = false}) {
-    return isPopup
-        ? PopupMenuButton<String>(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            icon: Icon(icon, size: 24, color: color),
-            onSelected: (String langCode) async {
-              await EasyLocalization.of(context)?.setLocale(Locale(langCode));
-              if (mounted) setState(() {});
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'ar', child: Text("العربية")),
-              const PopupMenuItem(value: 'en', child: Text("English")),
-              const PopupMenuItem(value: 'es', child: Text("Español")),
-              const PopupMenuItem(value: 'tr', child: Text("Türkçe")),
-              const PopupMenuItem(value: 'hi', child: Text("हिन्दी")),
-            ],
-          )
-        : IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            icon: Icon(icon, size: 24, color: color),
-            onPressed: () {
-              AdManager.showSmartAd();
-              onPressed();
-            });
   }
 }
