@@ -42,7 +42,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       "icon": Icons.vibration,
       "color": Colors.orangeAccent,
       "label": tr('sham_cash_number'),
-      "hint": "09xx xxx xxx",
+      "hint": "كود الاستقبال",
       "extra": tr('recipient_full_name')
     },
     "مكتب تركيا": {

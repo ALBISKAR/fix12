@@ -17,7 +17,6 @@ import 'package:check_vpn_connection/check_vpn_connection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:ntp/ntp.dart';
 
 // استيراد الملفات المقسمة الجديدة
 import 'package:syria_earn_pro/screens/videos_tab_screen.dart';
@@ -48,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Timer? _unityTimer;
   Timer? _admobTimer;
   BannerAd? _adMobBanner;
-  final bool _canClaimDaily = false;
+  bool _canClaimDaily = false;
 
   bool get isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
@@ -590,14 +589,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // 🛡️ محاولة جلب الوقت عبر الإنترنت، وإذا فشل نعتمد على وقت الجهاز لضمان عمل الزر في كل الأجهزة
-      DateTime now;
-      try {
-        now = await NTP.now();
-      } catch (e) {
-        now = DateTime.now(); // خطة بديلة لكي لا يعلق الزر
-        debugPrint("NTP failed, using device time as fallback.");
-      }
+      // 📱 وقت الجهاز الحالي الذي قد يكون تم التلاعب به
+      DateTime now = DateTime.now();
+      String todayStr = "${now.year}-${now.month}-${now.day}";
 
       final doc = await FirebaseFirestore.instance
           .collection('users')
@@ -611,33 +605,36 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
         currentStreak = data['streak_count'] ?? 0;
 
-        // حماية إضافية: إذا تخطى الـ Streak اليوم السابع بشكل خاطئ، نعيده لليوم الأول
         if (currentStreak >= 7) {
           currentStreak = 0;
         }
 
-        if (data.containsKey('last_daily_claim') &&
-            data['last_daily_claim'] != null) {
-          dynamic rawDate = data['last_daily_claim'];
-          DateTime lastClaimDate;
+        // 🚨 1. كشف التلاعب بالوقت (الحماية الأساسية)
+        // نتحقق من آخر وقت تم تسجيله في السيرفر لأي نشاط (دخول أو مكافأة)
+        if (data.containsKey('last_security_timestamp')) {
+          Timestamp lastSecurityTimestamp = data['last_security_timestamp'];
+          DateTime lastSecurityDate = lastSecurityTimestamp.toDate();
 
-          if (rawDate is Timestamp) {
-            lastClaimDate = rawDate.toDate();
-          } else if (rawDate is String) {
-            lastClaimDate = DateTime.parse(rawDate);
-          } else {
-            lastClaimDate = now.subtract(const Duration(days: 2));
+          // إذا كان وقت الهاتف الحالي "قبل" أو "يساوي" وقت آخر عملية حقيقية تم حفظها
+          // فهذا يعني بنسبة 100% أن المستخدم قام بتغيير وقت الهاتف للخلف أو يتلاعب بالوقت
+          if (now.isBefore(lastSecurityDate) ||
+              now.isAtSameMomentAs(lastSecurityDate)) {
+            _showErrorSnackBar(
+                "🚨 تم كشف تلاعب بالوقت! يرجى ضبط وقت وتاريخ الهاتف على الوضع التلقائي.");
+            return;
           }
+        }
 
-          DateTime nextClaimDate = lastClaimDate.add(const Duration(hours: 24));
-          if (now.isBefore(nextClaimDate)) {
+        // 🚨 2. فحص هل قام المستخدم بتقديم الوقت ليوم مستقبلي للحصول على مكافأة متكررة؟
+        if (data.containsKey('last_claim_date_str') &&
+            data['last_claim_date_str'] != null) {
+          String lastClaimStr = data['last_claim_date_str'];
+
+          if (lastClaimStr == todayStr) {
             canClaim = false;
-            remainingTime = nextClaimDate.difference(now);
-          }
-
-          // 🔄 منطق كسر الـ Streak: إذا مرت 48 ساعة ولم يطالب، يعود العداد لليوم الأول
-          if (now.difference(lastClaimDate).inHours >= 48) {
-            currentStreak = 0;
+            DateTime tomorrow = DateTime(now.year, now.month, now.day)
+                .add(const Duration(days: 1));
+            remainingTime = tomorrow.difference(now);
           }
         }
       }
@@ -645,53 +642,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (!mounted) return;
       _showRewardDialog(user.uid, currentStreak, canClaim, remainingTime);
     } catch (e) {
-      _showErrorSnackBar("تأكد من اتصالك بالإنترنت للمطالبة بالجائزة");
+      _showErrorSnackBar(
+          "فشل الاتصال، يرجى التحقق من استقرار الشبكة والمحاولة مجدداً");
     }
   }
 
   Future<void> _processDailyReward(
       String uid, int rewardAmount, int currentStreak) async {
-    // حفظ الـ ScaffoldMessenger مسبقاً قبل الفجوة الزمنية بناءً على قاعدتنا الذهبية
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     try {
-      DateTime realNow;
-      try {
-        realNow = await NTP.now();
-      } catch (e) {
-        realNow = DateTime.now();
-      }
-
-      WriteBatch batch = FirebaseFirestore.instance.batch();
-
-      DocumentReference requestRef =
-          FirebaseFirestore.instance.collection('reward_requests').doc();
-      batch.set(requestRef, {
-        'userId': uid,
-        'timestamp': FieldValue.serverTimestamp(),
-        'amount': rewardAmount
-      });
-
-      // 🔄 الحسبة الذكية: إذا كان في اليوم السابع (الفهرس 6)، المكافأة القادمة تعود لتصفير العداد (0) لتبدأ من اليوم الأول
+      DateTime now = DateTime.now();
+      String todayStr = "${now.year}-${now.month}-${now.day}";
       int nextStreak = (currentStreak >= 6) ? 0 : currentStreak + 1;
 
-      DocumentReference userRef =
-          FirebaseFirestore.instance.collection('users').doc(uid);
-      batch.update(userRef, {
+      // تحديث البيانات وحفظ طابع زمني أمني صارم (last_security_timestamp)
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'points': FieldValue.increment(rewardAmount),
-        'streak_count':
-            nextStreak, // حفظ قيمة الـ Streak الجديدة المقفلة بالدورة الأسبوعية
-        'last_daily_claim': FieldValue.serverTimestamp(),
+        'streak_count': nextStreak,
+        'last_claim_date_str': todayStr,
+        'last_daily_claim': Timestamp.fromDate(now),
+        'last_security_timestamp':
+            Timestamp.fromDate(now), // 👈 الطابع الأمني الأساسي
         'points_history': FieldValue.arrayUnion([
           {
             'type': 'daily_reward_claim',
             'amount': rewardAmount,
-            'timestamp': realNow.toIso8601String()
+            'timestamp': now.toIso8601String()
           }
         ])
       });
 
-      await batch.commit();
+      _checkDailyRewardStatus(uid);
 
       if (!mounted) return;
       HapticFeedback.mediumImpact();
@@ -700,9 +682,61 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating));
     } catch (e) {
-      if (!mounted) return;
-      _showErrorSnackBar(tr('withdraw_error'));
+      _showErrorSnackBar("تعذر حفظ الجائزة، تأكد من جودة اتصالك بالإنترنت");
     }
+  }
+
+  void _checkDailyRewardStatus(String uid) async {
+    try {
+      DateTime now = DateTime.now();
+      String todayStr = "${now.year}-${now.month}-${now.day}";
+
+      final userDocRef =
+          FirebaseFirestore.instance.collection('users').doc(uid);
+      final doc = await userDocRef.get();
+
+      if (doc.exists && doc.data() != null) {
+        var data = doc.data()!;
+
+        // 🛡️ فحص الأمان المستمر عند فتح التطبيق
+        if (data.containsKey('last_security_timestamp')) {
+          Timestamp lastSecurity = data['last_security_timestamp'];
+          DateTime lastSecurityDate = lastSecurity.toDate();
+
+          // إذا فتح التطبيق بوقت "أقدم" من آخر وقت مسجل حقيقي
+          if (now.isBefore(lastSecurityDate)) {
+            // نقوم بقفل واجهة المكافأة تلقائياً لحمايتك
+            if (mounted) {
+              setState(() {
+                _canClaimDaily = false;
+              });
+            }
+            return;
+          }
+        }
+
+        // 🔄 تحديث طابع الأمان بشكل مستمر مع كل دخله طبيعية للتطبيق لنسد عليه خط الرجوع
+        await userDocRef.set({
+          'last_security_timestamp': Timestamp.fromDate(now),
+        }, SetOptions(merge: true));
+
+        if (data.containsKey('last_claim_date_str') &&
+            data['last_claim_date_str'] != null) {
+          String lastClaimStr = data['last_claim_date_str'];
+          if (mounted) {
+            setState(() {
+              _canClaimDaily = lastClaimStr != todayStr;
+            });
+          }
+          return;
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _canClaimDaily = true;
+        });
+      }
+    } catch (_) {}
   }
 
   @override
