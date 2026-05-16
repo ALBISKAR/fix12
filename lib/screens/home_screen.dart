@@ -589,7 +589,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
-      DateTime now = await NTP.now();
+
+      // 🛡️ محاولة جلب الوقت عبر الإنترنت، وإذا فشل نعتمد على وقت الجهاز لضمان عمل الزر في كل الأجهزة
+      DateTime now;
+      try {
+        now = await NTP.now();
+      } catch (e) {
+        now = DateTime.now(); // خطة بديلة لكي لا يعلق الزر
+        debugPrint("NTP failed, using device time as fallback.");
+      }
 
       final doc = await FirebaseFirestore.instance
           .collection('users')
@@ -602,6 +610,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (doc.exists && doc.data() != null) {
         Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
         currentStreak = data['streak_count'] ?? 0;
+
+        // حماية إضافية: إذا تخطى الـ Streak اليوم السابع بشكل خاطئ، نعيده لليوم الأول
+        if (currentStreak >= 7) {
+          currentStreak = 0;
+        }
 
         if (data.containsKey('last_daily_claim') &&
             data['last_daily_claim'] != null) {
@@ -621,20 +634,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             canClaim = false;
             remainingTime = nextClaimDate.difference(now);
           }
+
+          // 🔄 منطق كسر الـ Streak: إذا مرت 48 ساعة ولم يطالب، يعود العداد لليوم الأول
+          if (now.difference(lastClaimDate).inHours >= 48) {
+            currentStreak = 0;
+          }
         }
       }
 
-      if (mounted) {
-        _showRewardDialog(user.uid, currentStreak, canClaim, remainingTime);
-      }
+      if (!mounted) return;
+      _showRewardDialog(user.uid, currentStreak, canClaim, remainingTime);
     } catch (e) {
       _showErrorSnackBar("تأكد من اتصالك بالإنترنت للمطالبة بالجائزة");
     }
   }
 
-  Future<void> _processDailyReward(String uid, int rewardAmount) async {
+  Future<void> _processDailyReward(
+      String uid, int rewardAmount, int currentStreak) async {
+    // حفظ الـ ScaffoldMessenger مسبقاً قبل الفجوة الزمنية بناءً على قاعدتنا الذهبية
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     try {
-      DateTime realNow = await NTP.now();
+      DateTime realNow;
+      try {
+        realNow = await NTP.now();
+      } catch (e) {
+        realNow = DateTime.now();
+      }
+
       WriteBatch batch = FirebaseFirestore.instance.batch();
 
       DocumentReference requestRef =
@@ -645,10 +672,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'amount': rewardAmount
       });
 
+      // 🔄 الحسبة الذكية: إذا كان في اليوم السابع (الفهرس 6)، المكافأة القادمة تعود لتصفير العداد (0) لتبدأ من اليوم الأول
+      int nextStreak = (currentStreak >= 6) ? 0 : currentStreak + 1;
+
       DocumentReference userRef =
           FirebaseFirestore.instance.collection('users').doc(uid);
       batch.update(userRef, {
         'points': FieldValue.increment(rewardAmount),
+        'streak_count':
+            nextStreak, // حفظ قيمة الـ Streak الجديدة المقفلة بالدورة الأسبوعية
         'last_daily_claim': FieldValue.serverTimestamp(),
         'points_history': FieldValue.arrayUnion([
           {
@@ -660,9 +692,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       });
 
       await batch.commit();
+
       if (!mounted) return;
       HapticFeedback.mediumImpact();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      scaffoldMessenger.showSnackBar(SnackBar(
           content: Text(tr('reward_processing_msg')),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating));
@@ -1240,9 +1273,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             AdManager.showSmartAd();
                             timer?.cancel();
                             Navigator.pop(ctx);
+
                             if (!mounted) return;
                             int rewardAmount = 10 + (streak * 5);
-                            await _processDailyReward(uid, rewardAmount);
+
+                            // 🛠️ تم تملأ المعامل الثالث هنا لإرسال الـ streak الحالي للمكافأة
+                            await _processDailyReward(
+                                uid, rewardAmount, streak);
                           },
                           child: Text(tr('claim_reward_now')),
                         )
