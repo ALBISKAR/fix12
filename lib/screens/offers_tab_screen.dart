@@ -149,7 +149,7 @@ class _OffersTabScreenState extends State<OffersTabScreen> {
           _buildTaskCard(
             tr('earn_points_offers'),
             tr('offers_wall_sub'),
-            500,
+            999,
             Icons.local_fire_department_rounded,
             () {
               // 🛡️ حماية الـ BuildContext قبل الانتقال المباشر للـ WebView
