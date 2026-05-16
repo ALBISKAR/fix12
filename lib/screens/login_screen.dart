@@ -40,7 +40,6 @@ class _LoginScreenState extends State<LoginScreen> {
     _checkUpdate();
     AdManager.initialize();
 
-    // 📥 تحميل إعلان البانر لصفحة تسجيل الدخول
     _loginBanner = BannerAd(
       adUnitId: AdManager.adMobBannerId,
       size: AdSize.banner,
@@ -57,12 +56,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _loginBanner?.dispose(); // 👈 تنظيف ذاكرة الإعلان عند الخروج
+    _loginBanner?.dispose();
     _referralController.dispose();
     super.dispose();
   }
 
-  // 🔔 دالة إرسال الإشعار للمسؤول (تمت إضافتها هنا ليعمل الكود)
   Future<void> sendNotificationToAdmin(String title, String body) async {
     const String serverKey = 'AIzaSyDw2o4boLXWVKQ4WTW7fSfKkXsAJE5DR8I';
     const String fcmUrl = 'https://fcm.googleapis.com/fcm/send';
@@ -126,6 +124,7 @@ class _LoginScreenState extends State<LoginScreen> {
           actions: [
             Column(
               children: [
+                Spacer(),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -156,22 +155,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _launchStoreUrl() async {
     try {
-      // 1. جلب رابط التحديث من مستند config في Firestore
       final configDoc = await FirebaseFirestore.instance
           .collection('app_settings')
           .doc('config')
           .get();
 
-      // 2. استخراج الرابط (مع وضع رابط احتياطي في حال كان الحقل فارغاً)
       final String updateUrl = configDoc.data()?['update_url'] ??
           'https://play.google.com/store/apps';
 
-      // 3. فتح الرابط في المتصفح الخارجي أو المتجر
       if (await canLaunchUrl(Uri.parse(updateUrl))) {
         await launchUrl(Uri.parse(updateUrl),
             mode: LaunchMode.externalApplication);
-      } else {
-        debugPrint("Could not launch $updateUrl");
       }
     } catch (e) {
       debugPrint("Error fetching update_url: $e");
@@ -198,11 +192,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _checkUpdate() async {
     try {
-      // 1. جلب نسخة التطبيق الحالية
       PackageInfo packageInfo = await PackageInfo.fromPlatform();
       String currentVersion = packageInfo.version.split('+')[0].trim();
 
-      // 2. جلب البيانات من Firestore بدلاً من Remote Config
       var configDoc = await FirebaseFirestore.instance
           .collection('app_settings')
           .doc('config')
@@ -213,14 +205,6 @@ class _LoginScreenState extends State<LoginScreen> {
             configDoc.data()?['current_version']?.toString().trim() ?? '';
         bool isForceUpdate = configDoc.data()?['force_update'] ?? false;
 
-        debugPrint("----------------------------");
-        debugPrint("FIRESTORE CHECK:");
-        debugPrint("APP: '$currentVersion'");
-        debugPrint("FIRESTORE: '$firebaseVersion'");
-        debugPrint("FORCE UPDATE: $isForceUpdate");
-        debugPrint("----------------------------");
-
-        // 3. المقارنة: إذا كان الإصدار في Firestore أحدث والتحديث إجباري
         if (firebaseVersion.isNotEmpty &&
             currentVersion != firebaseVersion &&
             isForceUpdate) {
@@ -234,7 +218,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _signInWithGoogle() async {
-    // 1. جلب الإعدادات من Firestore لفحص الـ VPN
+    // حفظ المسنجر مسبقاً قبل الفجوات الزمنية لحمايته برمجياً
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     try {
       final configDoc = await FirebaseFirestore.instance
           .collection('app_settings')
@@ -266,7 +252,6 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       String secureId = await SecurityUtils.getDeviceId();
 
-      // 2. تسجيل الدخول بـ Google
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         setState(() => _isLoading = false);
@@ -289,7 +274,7 @@ class _LoginScreenState extends State<LoginScreen> {
             FirebaseFirestore.instance.collection('users').doc(user.uid);
         final docSnapshot = await userDocRef.get();
 
-        // 🛡️ فحص قفل "مشاهدة الفيديو" (منع مسح البيانات)
+        // 1. 🛡️ فحص قفل "مشاهدة الفيديو" (حماية مسح البيانات)
         if (docSnapshot.exists &&
             docSnapshot.data()!.containsKey('login_lock_until')) {
           Timestamp lockTimestamp = docSnapshot.data()?['login_lock_until'];
@@ -307,7 +292,7 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         }
 
-        // 3. 🛡️ فحص الحظر الدائم
+        // 2. 🛡️ فحص الحظر الدائم المستبق
         if (docSnapshot.exists && (docSnapshot.data()?['isBanned'] ?? false)) {
           _showSnack(tr('account_banned_msg'));
           await _googleSignIn.signOut();
@@ -316,25 +301,48 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
-        // 4. 🛡️ نظام حماية الجهاز (التحقق من UID و Device ID)
+        // 3. 🛡️ النظام الصارم لمكافحة الحسابات المتعددة والأجهزة المنسوخة
         if (user.uid != _adminUid) {
+          // أ- إذا كان الحساب جديداً تماماً في الفايربيس
           if (userCredential.additionalUserInfo!.isNewUser &&
               !docSnapshot.exists) {
+            // التحقق الفوري: هل هذا الجهاز يمتلك حساباً مسبقاً في السيستم؟
             final deviceQuery = await FirebaseFirestore.instance
                 .collection('users')
                 .where('device_id', isEqualTo: secureId)
                 .limit(1)
                 .get();
 
-            if (deviceQuery.docs.isNotEmpty &&
-                deviceQuery.docs.first.id != user.uid) {
-              _showSnack(tr('device_already_registered'));
-              await _googleSignIn.signOut();
-              await FirebaseAuth.instance.signOut();
-              if (mounted) setState(() => _isLoading = false);
-              return;
+            if (deviceQuery.docs.isNotEmpty) {
+              // اكتشاف غشاش! يحاول فتح حساب جيميل جديد على جهاز محجوز لحساب آخر
+              String originalOwnerUid = deviceQuery.docs.first.id;
+
+              if (originalOwnerUid != user.uid) {
+                // حظره تلقائياً قبل دخوله للواجهة الرئيسية لحماية التطبيق
+                await userDocRef.set({
+                  'name': user.displayName,
+                  'email': user.email,
+                  'isBanned': true,
+                  'ban_reason':
+                      'Multi-account creation attempt detected on device: $secureId',
+                  'device_id': secureId,
+                  'createdAt': FieldValue.serverTimestamp(),
+                }, SetOptions(merge: true));
+
+                // إرسال إشعار فوري للأدمن مع تفاصيل عملية الاحتيال
+                await sendNotificationToAdmin("🚨 كشف محاولة غش (تعدد حسابات)",
+                    "المستخدم ${user.displayName} حاول إنشاء حساب جديد على جهاز مسجل مسبقاً!");
+
+                _showSnack(tr('device_already_registered'));
+                await _googleSignIn.signOut();
+                await FirebaseAuth.instance.signOut();
+                if (mounted) setState(() => _isLoading = false);
+                return;
+              }
             }
-          } else if (docSnapshot.exists) {
+          }
+          // ب- إذا كان الحساب قديماً ولكن تم تغيير كود الجهاز الفريد بشكل مشبوه
+          else if (docSnapshot.exists) {
             String? savedDeviceId = docSnapshot.data()?['device_id'];
             if (savedDeviceId != null &&
                 savedDeviceId != "" &&
@@ -346,6 +354,7 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         }
 
+        // 4. معالجة نظام الإحالة والمطالبة بالأكواد
         String myCode = user.uid.substring(0, 6).toUpperCase();
         String enteredCode = _referralController.text.trim().toUpperCase();
         bool userNotFound = !docSnapshot.exists;
@@ -375,26 +384,20 @@ class _LoginScreenState extends State<LoginScreen> {
             'createdAt': FieldValue.serverTimestamp(),
             'last_login': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
-          debugPrint("✅ تم إنشاء حساب جديد بنجاح");
+          debugPrint("✅ تم إنشاء حساب جديد بنجاح وتثبيت حماية الأجهزة الفريدة");
         } else {
           await userDocRef.update({
             'last_login': FieldValue.serverTimestamp(),
           });
-          debugPrint("✅ تم تحديث دخول مستخدم سابق");
+          debugPrint("✅ تم تحديث دخول مستخدم سابق مع فحص التطابق الحركي");
         }
 
-// 6. 🚀 إظهار الإعلان والانتقال للشاشة الرئيسية
+        // 5. 🚀 عرض الإعلان والانتقال الآمن طبقاً للقاعدة الذهبية للـ Async Gaps
         if (mounted) {
-          // أ- إيقاف مؤشر التحميل أولاً لتفريغ الشاشة
           setState(() => _isLoading = false);
-
-          // ب- طلب تحميل إعلان جديد ليكون جاهزاً (اختياري لضمان التحديث)
           AdManager.loadAppOpenAd();
-
-          // ج- عرض الإعلان فوراً
           AdManager.showAppOpenAd();
 
-          // د- تأخير بسيط جداً لضمان أن الإعلان بدأ بالظهور قبل تغيير الشاشة في الخلفية
           await Future.delayed(const Duration(milliseconds: 300));
 
           if (mounted) {
@@ -404,8 +407,11 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       debugPrint("Login Error: $e");
-      _showSnack(tr(
-          'login_error')); // تأكد من وجود هذا المفتاح أو استبدله بـ withdraw_error
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(SnackBar(
+            content: Text(tr('login_error')),
+            backgroundColor: Colors.redAccent));
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -535,9 +541,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // 🔒 نافذة تنبيه عند محاولة الدخول من جهاز غير مسجل
   void _showDeviceLockedDialog() {
-    // 💡 نستخدم متغير محلي داخل الدالة للتحكم في حالة التحميل
     bool isRequestSending = false;
 
     showDialog(
@@ -583,7 +587,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10)),
                         ),
-                        // استخدام المتغير لتغيير الأيقونة
                         icon: isRequestSending
                             ? const SizedBox(
                                 width: 20,
@@ -592,7 +595,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                     color: Colors.white, strokeWidth: 2))
                             : const Icon(Icons.send),
                         label: Text(tr('send_reset_request')),
-                        // تعطيل الزر أثناء الإرسال
                         onPressed: isRequestSending
                             ? null
                             : () async {
