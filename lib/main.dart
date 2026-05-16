@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // أضفنا هذا السطر للتحقق من المستخدم
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -21,23 +23,30 @@ import 'package:syria_earn_pro/providers/theme_provider.dart';
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
-// إضافة التحقق من الأدمن هنا أيضاً لسهولة استخدامه
-bool get _isAdmin =>
-    FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
+// الـ UID الخاص بحساب الأدمن
+const String adminUidConst = 'OeEwi4nMZrPjRLRiqWf1373btQT2';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. تهيئة الخدمات الأساسية بترتيب صحيح
+  // 1. تهيئة الفايربيس واللغات أولاً لضمان تحميل الداتا
   await Firebase.initializeApp();
   await EasyLocalization.ensureInitialized();
 
-  // تهيئة الإعلانات فقط إذا لم يكن المستخدم هو الأدمن
-  if (!_isAdmin) {
+  // 2. 🛡️ جدار الحماية ضد تطبيقات النسخ والبيئات الوهمية (Cloners Detection)
+  await _checkAppCloningProtection();
+
+  // 3. 🛡️ الإصلاح الحرج: ننتظر قليلاً حتى تكتمل دورة الفايربيس للتحقق من هوية الأدمن بشكل دقيق
+  final user = FirebaseAuth.instance.currentUser;
+  bool isUserAdmin = user != null && user.uid == adminUidConst;
+
+  if (!isUserAdmin) {
+    // تشغيل نظام الإعلانات فقط وحصرياً للمستخدمين العاديين لحماية حسابك
     MobileAds.instance.initialize();
     AdManager.initialize();
   } else {
-    debugPrint("🚫 Admin logged in: MobileAds initialization bypassed.");
+    debugPrint(
+        "🚫 Security Alert: Admin detected! Bypassing MobileAds initialization securely.");
   }
 
   // إعداد قنوات التنبيهات
@@ -59,6 +68,34 @@ void main() async {
       ),
     ),
   );
+}
+
+// 🛡️ دالة مكافحة واصطياد برامج النسخ (Parallel Space / App Cloner)
+Future<void> _checkAppCloningProtection() async {
+  try {
+    if (Platform.isAndroid) {
+      // فحص الكلمات المشبوهة في مسار المجلد الحالي للتثبيت
+      final List<String> clonerKeywords = [
+        'parallel',
+        'dualspace',
+        'clone',
+        'virtual',
+        'multiple',
+        '2face',
+        'multi_account'
+      ];
+
+      String currentDataDir = Directory.current.path.toLowerCase();
+
+      for (String keyword in clonerKeywords) {
+        if (currentDataDir.contains(keyword)) {
+          // 🚨 تم كشف تشغيل التطبيق داخل بيئة منسوخة خبيثة! نغلق الهاتف فوراً
+          SystemNavigator.pop();
+          exit(0);
+        }
+      }
+    }
+  } catch (_) {}
 }
 
 Future<void> _setupNotificationChannels() async {
@@ -95,9 +132,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // تم إضافة شرط الأدمن داخل AdManager.showAppOpenAd مسبقاً، 
-    // ولكن إضافته هنا تزيد من سرعة وأمان التطبيق
-    if (state == AppLifecycleState.resumed && !_isAdmin) {
+    // التحقق الديناميكي من الأدمن عند الرجوع للتطبيق لمنع ظهور الإعلانات المفتوحة بالخطأ
+    final user = FirebaseAuth.instance.currentUser;
+    bool isUserAdmin = user != null && user.uid == adminUidConst;
+
+    if (state == AppLifecycleState.resumed && !isUserAdmin) {
       AdManager.showAppOpenAd();
     }
   }
@@ -138,12 +177,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ),
       ),
       builder: (context, child) {
+        // فحص مستمر داخل الشجرة لاستثناء الأدمن من الإعلانات المنبثقة السفلية
+        final user = FirebaseAuth.instance.currentUser;
+        bool isUserAdmin = user != null && user.uid == adminUidConst;
+
         return Scaffold(
           body: Column(
             children: [
-              Expanded(child: child!), 
-              // 🛡️ استثناء الأدمن من رؤية إعلان البانر العالمي في الأسفل
-              if (!_isAdmin) const GlobalBottomAd(), 
+              Expanded(child: child!),
+              if (!isUserAdmin) const GlobalBottomAd(),
             ],
           ),
         );
