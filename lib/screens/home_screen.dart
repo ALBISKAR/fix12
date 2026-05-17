@@ -45,10 +45,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Timer? _unityTimer;
   Timer? _admobTimer;
 
-  // 🛡️ الاستخدام الحركي الآمن لمتغير المكافأة اليومية
   bool _canClaimDaily = false;
-
-  // كائن الاستماع العام لحالة الشبكة لمنع الـ Memory Leaks والتحذيرات
 
   bool get isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
@@ -157,7 +154,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (mounted) {
         AdManager.initialize();
         AdManager.showAppOpenAdOnce();
-
         _initNotifications();
       }
     });
@@ -574,186 +570,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  Widget _buildVideoTab(int unityRemaining, int admobRemaining,
-      int cooldownSeconds, int unityPoints, int admobPoints) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildVideoServerCard(
-          title: tr('unity_ad'),
-          sub: _unitySecondsLeft > 0
-              ? "${tr('wait')} ${_formatTime(_unitySecondsLeft)}"
-              : tr('video_ad_sub'),
-          points: unityPoints,
-          icon: FontAwesomeIcons.unity,
-          remaining: unityRemaining,
-          isPremium: true,
-          onTap: () {
-            if (_unitySecondsLeft > 0 || _isWaiting || unityRemaining <= 0) {
-              if (unityRemaining <= 0) _showLimitReachedDialog();
-              return;
-            }
-            setState(() => _isWaiting = true);
-            _handleAdSelection(server: "unity", cooldown: cooldownSeconds);
-          },
-        ),
-        const SizedBox(height: 20),
-        _buildVideoServerCard(
-          title: tr('admob_ad'),
-          sub: _admobSecondsLeft > 0
-              ? "${tr('wait')} ${_formatTime(_admobSecondsLeft)}"
-              : tr('video_ad_sub'),
-          points: admobPoints,
-          icon: FontAwesomeIcons.google,
-          remaining: admobRemaining,
-          isPremium: false,
-          onTap: () {
-            if (_admobSecondsLeft > 0 || _isWaiting || admobRemaining <= 0) {
-              if (admobRemaining <= 0) _showLimitReachedDialog();
-              return;
-            }
-            setState(() => _isWaiting = true);
-            _handleAdSelection(server: "admob", cooldown: cooldownSeconds);
-          },
-        ),
-        const SizedBox(height: 80),
-      ],
-    );
-  }
-
-  Widget _buildVideoServerCard({
-    required String title,
-    required String sub,
-    required int points,
-    required dynamic icon,
-    required VoidCallback onTap,
-    required int remaining,
-    bool isPremium = false,
-  }) {
-    return Card(
-      color: const Color(0xFF1E1E2E),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(
-          color: isPremium
-              ? Colors.amber.withValues(alpha: 0.3)
-              : Colors.cyanAccent.withValues(alpha: 0.3),
-        ),
-      ),
-      child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-        leading: ShaderMask(
-          shaderCallback: (Rect bounds) => LinearGradient(
-            colors: isPremium
-                ? [Colors.amber, Colors.orangeAccent]
-                : [Colors.blueAccent, Colors.cyanAccent],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ).createShader(bounds),
-          child: FaIcon(icon as FaIconData?, color: Colors.white, size: 42),
-        ),
-        title: Text(title,
-            style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 20)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 5),
-            Text(sub,
-                style: const TextStyle(color: Colors.white70, fontSize: 16)),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: remaining > 0
-                    ? Colors.green.withValues(alpha: 0.2)
-                    : Colors.red.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: Text(
-                "${tr('remaining')}: $remaining",
-                style: TextStyle(
-                  color: remaining > 0 ? Colors.greenAccent : Colors.redAccent,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ],
-        ),
-        trailing: Text(
-          "+$points",
-          style: const TextStyle(
-              color: Colors.greenAccent,
-              fontWeight: FontWeight.w900,
-              fontSize: 18),
-        ),
-        onTap: remaining > 0 ? onTap : null,
-      ),
-    );
-  }
-
-  Widget _buildTaskCard(
-      String title, String sub, int pts, IconData icon, VoidCallback action,
-      {bool isPremium = false}) {
-    return Card(
-      color: const Color(0xFF1E1E2E),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(
-          color:
-              isPremium ? Colors.amber.withValues(alpha: 0.5) : Colors.white10,
-        ),
-      ),
-      elevation: 4,
-      margin: const EdgeInsets.only(bottom: 15),
-      child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        leading: ShaderMask(
-          shaderCallback: (Rect bounds) => LinearGradient(
-            colors: isPremium
-                ? [Colors.amber, Colors.orangeAccent, Colors.yellowAccent]
-                : [Colors.blueAccent, Colors.cyanAccent],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ).createShader(bounds),
-          child: Icon(icon, color: Colors.white, size: 38),
-        ),
-        title: Text(title,
-            style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-                letterSpacing: 0.5)),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 5),
-          child: Text(sub,
-              style: const TextStyle(
-                  color: Colors.white70, fontSize: 14, height: 1.3)),
-        ),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.greenAccent.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(12),
-            border:
-                Border.all(color: Colors.greenAccent.withValues(alpha: 0.3)),
-          ),
-          child: Text("+$pts",
-              style: const TextStyle(
-                  color: Colors.greenAccent,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 17)),
-        ),
-        onTap: action,
-      ),
-    );
-  }
-
   void _initNotifications() {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     flutterLocalNotificationsPlugin.initialize(
@@ -831,7 +647,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<DateTime?> _getStrictNetworkTime() async {
-    // السيرفر الأول: WorldTimeAPI
     try {
       final response = await http
           .get(Uri.parse('https://worldtimeapi.org/api/timezone/Etc/UTC'))
@@ -842,7 +657,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     } catch (_) {}
 
-    // السيرفر الاحتياطي الثاني: TimeAPI (في حال سقوط أو حجب السيرفر الأول بسوريا)
     try {
       final response = await http
           .get(Uri.parse(
@@ -854,7 +668,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     } catch (_) {}
 
-    return null; // نعود بـ null إذا كانت شبكة المستخدم مقطوعة تماماً عن العالم
+    return null;
   }
 
   void _claimDailyReward() async {
@@ -862,7 +676,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // ⏳ استدعاء مفتاح الترجمة للمؤشر السريع بدلاً من النص الثابت
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(tr('verifying_network_time')),
@@ -870,10 +683,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ),
       );
 
-      // 1. جلب التوقيت العالمي الصارم من خوادم الوقت
       DateTime? networkTime = await _getStrictNetworkTime();
 
-      // 🚨 استدعاء مفتاح الترجمة عند فشل الاتصال بالخوادم
       if (networkTime == null) {
         _showErrorSnackBar(tr('network_time_error'));
         return;
@@ -890,31 +701,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           currentStreak = 0;
         }
 
-        // 🛡️ فحص الاستحقاق الصارم: هل مرت 24 ساعة كاملة في كوكب الأرض منذ آخر استلام؟
         if (data.containsKey('last_daily_claim')) {
           Timestamp lastClaimTimestamp = data['last_daily_claim'];
           DateTime lastClaimDate = lastClaimTimestamp.toDate();
 
-          // موعد الاستحقاق الشرعي القادم
           DateTime eligibleTime = lastClaimDate.add(const Duration(days: 1));
 
-          // إذا كان توقيت السيرفر العالمي الحالي "قبل" موعد الاستحقاق
           if (networkTime.isBefore(eligibleTime)) {
             Duration realRemaining = eligibleTime.difference(networkTime);
 
-            // استدعاء الترجمة وإمرار معامل الوقت المتبقي الديناميكي
             _showErrorSnackBar(
                 "${tr('next_reward_waiting')} ${_formatDuration(realRemaining)}");
-            return; // طرد فوري ومنع فتح أي واجهة
+            return;
           }
         }
 
-        // ⚡ مسمار الأمان السحابي: تحديث طابع السيرفر بوقت العملية الناجحة
         await userDocRef.set({
           'last_security_timestamp': Timestamp.fromDate(networkTime),
         }, SetOptions(merge: true));
 
-        // فتح واجهة الاستلام بأمان مطلق وبثقة عمياء من خوادم الوقت
         _showRewardDialog(
             user.uid, currentStreak, true, Duration.zero, networkTime);
       }
@@ -928,7 +733,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     try {
-      // 🌐 نعتمد كلياً على الوقت العالمي الممرر من خادم الوقت وليس ساعة الهاتف
       String todayStr =
           "${networkTime.year}-${networkTime.month}-${networkTime.day}";
 
@@ -938,16 +742,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'points': FieldValue.increment(rewardAmount),
         'streak_count': nextStreak,
         'last_claim_date_str': todayStr,
-        'last_daily_claim':
-            Timestamp.fromDate(networkTime), // ✅ وقت عالمي حقيقي
-        'last_security_timestamp':
-            Timestamp.fromDate(networkTime), // ✅ طابع أمني عالمي حقيقي
+        'last_daily_claim': Timestamp.fromDate(networkTime),
+        'last_security_timestamp': Timestamp.fromDate(networkTime),
         'points_history': FieldValue.arrayUnion([
           {
             'type': 'daily_reward_claim',
             'amount': rewardAmount,
-            'timestamp': Timestamp.fromDate(
-                networkTime), // ✅ طابع زمني حركي حقيقي للسجل الموحد
+            'timestamp': Timestamp.fromDate(networkTime), // ✅ طابع زمني حقيقي متوافق مع شاشة السجل
           }
         ])
       });
@@ -987,7 +788,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           String lastClaimStr = data['last_claim_date_str'];
           if (mounted) {
             setState(() {
-              // الزر يكون متاحاً فقط إذا كان تاريخ آخر استلام نصي "لا يساوي" تاريخ اليوم الحالي
               _canClaimDaily = lastClaimStr != todayStr;
             });
           }
@@ -1126,8 +926,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
                             if (!mounted) return;
                             int rewardAmount = 10 + (streak * 5);
-                            await _processDailyReward(
-                                uid, rewardAmount, streak, networkTime);
+                            await _processDailyReward(uid, rewardAmount, streak,
+                                networkTime);
                           },
                           child: Text(tr('claim_reward_now')),
                         )
@@ -1406,6 +1206,128 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           },
         );
       },
+    );
+  }
+
+  Widget _buildVideoTab(int unityRemaining, int admobRemaining,
+      int cooldownSeconds, int unityPoints, int admobPoints) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildVideoServerCard(
+          title: tr('unity_ad'),
+          sub: _unitySecondsLeft > 0
+              ? "${tr('wait')} ${_formatTime(_unitySecondsLeft)}"
+              : tr('video_ad_sub'),
+          points: unityPoints,
+          icon: FontAwesomeIcons.unity,
+          remaining: unityRemaining,
+          isPremium: true,
+          onTap: () {
+            if (_unitySecondsLeft > 0 || _isWaiting || unityRemaining <= 0) {
+              if (unityRemaining <= 0) _showLimitReachedDialog();
+              return;
+            }
+            setState(() => _isWaiting = true);
+            _handleAdSelection(server: "unity", cooldown: cooldownSeconds);
+          },
+        ),
+        const SizedBox(height: 20),
+        _buildVideoServerCard(
+          title: tr('admob_ad'),
+          sub: _admobSecondsLeft > 0
+              ? "${tr('wait')} ${_formatTime(_admobSecondsLeft)}"
+              : tr('video_ad_sub'),
+          points: admobPoints,
+          icon: FontAwesomeIcons.google,
+          remaining: admobRemaining,
+          isPremium: false,
+          onTap: () {
+            if (_admobSecondsLeft > 0 || _isWaiting || admobRemaining <= 0) {
+              if (admobRemaining <= 0) _showLimitReachedDialog();
+              return;
+            }
+            setState(() => _isWaiting = true);
+            _handleAdSelection(server: "admob", cooldown: cooldownSeconds);
+          },
+        ),
+        const SizedBox(height: 80),
+      ],
+    );
+  }
+
+  Widget _buildVideoServerCard({
+    required String title,
+    required String sub,
+    required int points,
+    required dynamic icon,
+    required VoidCallback onTap,
+    required int remaining,
+    bool isPremium = false,
+  }) {
+    return Card(
+      color: const Color(0xFF1E1E2E),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: isPremium
+              ? Colors.amber.withValues(alpha: 0.3)
+              : Colors.cyanAccent.withValues(alpha: 0.3),
+        ),
+      ),
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+        leading: ShaderMask(
+          shaderCallback: (Rect bounds) => LinearGradient(
+            colors: isPremium
+                ? [Colors.amber, Colors.orangeAccent]
+                : [Colors.blueAccent, Colors.cyanAccent],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ).createShader(bounds),
+          child: FaIcon(icon as FaIconData?, color: Colors.white, size: 42),
+        ),
+        title: Text(title,
+            style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 20)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 5),
+            Text(sub,
+                style: const TextStyle(color: Colors.white70, fontSize: 16)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: remaining > 0
+                    ? Colors.green.withValues(alpha: 0.2)
+                    : Colors.red.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(
+                "${tr('remaining')}: $remaining",
+                style: TextStyle(
+                  color: remaining > 0 ? Colors.greenAccent : Colors.redAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+        trailing: Text(
+          "+$points",
+          style: const TextStyle(
+              color: Colors.greenAccent,
+              fontWeight: FontWeight.w900,
+              fontSize: 18),
+        ),
+        onTap: remaining > 0 ? onTap : null,
+      ),
     );
   }
 
@@ -1749,6 +1671,74 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           style: const TextStyle(color: Colors.white54, fontSize: 11)),
       onTap: onTap,
     );
+  }
+
+  Widget _buildTaskCard(
+      String title, String sub, int pts, IconData icon, VoidCallback action,
+      {bool isPremium = false}) {
+    return Card(
+      color: const Color(0xFF1E1E2E),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color:
+              isPremium ? Colors.amber.withValues(alpha: 0.5) : Colors.white10,
+        ),
+      ),
+      elevation: 4,
+      margin: const EdgeInsets.only(bottom: 15),
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        leading: ShaderMask(
+          shaderCallback: (Rect bounds) => LinearGradient(
+            colors: isPremium
+                ? [Colors.amber, Colors.orangeAccent, Colors.yellowAccent]
+                : [Colors.blueAccent, Colors.cyanAccent],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ).createShader(bounds),
+          child: Icon(icon, color: Colors.white, size: 38),
+        ),
+        title: Text(title,
+            style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                letterSpacing: 0.5)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 5),
+          child: Text(sub,
+              style: const TextStyle(
+                  color: Colors.white70, fontSize: 14, height: 1.3)),
+        ),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.greenAccent.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(12),
+            border:
+                Border.all(color: Colors.greenAccent.withValues(alpha: 0.3)),
+          ),
+          child: Text("+$pts",
+              style: const TextStyle(
+                  color: Colors.greenAccent,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 17)),
+        ),
+        onTap: action,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _banListener?.cancel();
+    _unityTimer?.cancel();
+    _admobTimer?.cancel();
+    _controller.dispose();
+    _tabController.dispose();
+    super.dispose();
   }
 
   @override
