@@ -118,39 +118,54 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(seconds: 1), () {
-      AdManager.showAppOpenAdOnce();
-    });
+
+    // 1️⃣ أولاً: عمليات جلب البيانات الخفيفة والأساسية فوراً
     _startNetworkMonitoring();
     _startBanListener();
     _loadUserData();
 
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      _syncCooldownFromFirebase(user.uid);
       _checkDailyRewardStatus(user.uid);
+      _setupPointsStream();
 
-      // 1. 🔥 تهيئة وتحميل أول فيديو لـ Start.io (سيرفر 1) في الخلفية فور إقلاع الشاشة
-      AdManager.loadServer1Ad();
-
+      // 🔄 الربط الحاسم لكولباك إغلاق الإعلانات
       AdManager.onAdClosedCallback = () {
         if (mounted) {
           setState(() {
-            _unitySecondsLeft = 0; // تصفير محلي مؤقت لاستقبال القيمة الجديدة
+            _unitySecondsLeft = 0;
           });
-          // ننتظر 500 مللي ثانية لضمان اكتمال عملية الـ WriteBatch في السيرفر ثم نجلب التايمر الحقيقي
           Future.delayed(const Duration(milliseconds: 500), () {
             _syncCooldownFromFirebase(user.uid);
           });
         }
       };
+
+      // ⏱️ فحص العدادات التنازلية القادمة من فايربيس بعد نصف ثانية فقط من الإقلاع
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) _syncCooldownFromFirebase(user.uid);
+      });
+
+      // 🌐 السيرفر 1 (Start.io): تأجيل تهيئة وتحميل أول فيديو لمدة (ثانية واحدة)
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) {
+          AdManager.initialize(); // تهيئة المحركات الشاملة (أدموب + Start.io)
+          AdManager.loadServer1Ad(); // بدء جلب كائن الفيديو لسيرفر 1
+          debugPrint("⚡ [سيرفر 1]: تم بدء التهيئة والتحميل بنجاح بعد ثانية.");
+        }
+      });
+
+      // 🔔 إعلان فتح التطبيق (App Open): تأجيل العرض حتى تستقر الشاشة تماماً بعد (ثانيتين)
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          AdManager.showAppOpenAdOnce();
+          debugPrint(
+              "⚡ [إعلان الفتح]: تم بدء طلب إعلان فتح التطبيق بعد ثانيتين.");
+        }
+      });
     }
-    _setupPointsStream();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkForUpdate();
-    });
-
+    // 2️⃣ ثانياً: تهيئة الـ الانيميشن والـ Controllers الخاصة بالواجهة فوراً لمنع أي تجميد
     _controller = AnimationController(
       duration: const Duration(seconds: 2),
       vsync: this,
@@ -166,36 +181,57 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     });
 
+    // 3️⃣ ثالثاً: ترحيل الخدمات البعيدة والإشعارات لتعمل بعد رسم الشاشة كلياً (PostFrameCallback)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        AdManager.initialize();
-        AdManager.showAppOpenAdOnce();
-        _initNotifications();
+        _checkForUpdate(); // فحص تحديثات التطبيق السحابية بأمان
+
+        // 💬 تأجيل خدمات الإشعارات المحلية الثقيلة لمدة (3 ثوانٍ) لتعمل بصمت في الخلفية
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) _initNotifications();
+        });
       }
     });
   }
 
   void _checkForUpdate() async {
     try {
+      // 1. جلب بيانات النسخة الحالية المثبتة على هاتف المستخدم
       PackageInfo packageInfo = await PackageInfo.fromPlatform();
-      String localVersion = packageInfo.version;
 
+      // ✅ الإصلاح الأول: نأخذ رقم الإصدار فقط ونحذف أي زيادة بعد علامة الـ + لضمان دقة المطابقة
+      String localVersion = packageInfo.version.split('+')[0].trim();
+
+      // 2. جلب إعدادات التحديث من الفايرستور
       var config = await FirebaseFirestore.instance
           .collection('app_settings')
           .doc('config')
           .get();
 
-      if (config.exists) {
-        String serverVersion = config.data()?['current_version'] ?? "1.0.0";
-        String updateUrl = config.data()?['update_url'] ?? "";
-        bool isForceUpdate = config.data()?['force_update'] ?? false;
+      if (config.exists && config.data() != null) {
+        var data = config.data()!;
 
-        if (serverVersion != localVersion && isForceUpdate) {
-          _showUpdateDialog(updateUrl);
+        // ✅ الإصلاح الثاني: تحويل القيمة جلبها كـ String بشكل صارم لمنع تضارب الأنواع (Cast Error)
+        String serverVersion =
+            data['current_version']?.toString().trim() ?? "1.0.0";
+        String updateUrl = data['update_url']?.toString() ?? "";
+        bool isForceUpdate = data['force_update'] ?? false;
+
+        debugPrint(
+            "📱 Local Version: '$localVersion' | 🌐 Server Version: '$serverVersion' | 🔥 Force: $isForceUpdate");
+
+        // 3. التحقق والمقارنة الشرطية المستقرة
+        if (serverVersion != localVersion &&
+            isForceUpdate &&
+            updateUrl.isNotEmpty) {
+          if (mounted) {
+            _showUpdateDialog(updateUrl);
+          }
         }
       }
     } catch (e) {
-      debugPrint("Update Check Error: $e");
+      // طباعة الخطأ في الـ Console إذا حدث أي خلل أثناء الفحص للتتبع
+      debugPrint("❌ Crucial Update Check Error: $e");
     }
   }
 
