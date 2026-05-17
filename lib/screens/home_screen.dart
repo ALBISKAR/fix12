@@ -18,6 +18,9 @@ import 'package:check_vpn_connection/check_vpn_connection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'dart:convert'; // تأكد من وجود هذا الـ import في أعلى الملف للمزامنة
+import 'package:http/http.dart'
+    as http; // تأكد من وجود حزمة http في الـ pubspec
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -896,58 +899,86 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  Future<DateTime> _getNetworkTime() async {
+    try {
+      // نستخدم الـ API عبر HTTP ليتخطى جدار حظر بروتوكولات الوقت بسوريا
+      final response = await http
+          .get(Uri.parse('https://worldtimeapi.org/api/timezone/Etc/UTC'))
+          .timeout(const Duration(seconds: 4));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return DateTime.parse(data['utc_datetime']); // توقيت عالمي فولاذي ونظيف
+      }
+    } catch (_) {}
+    return DateTime
+        .now(); // خطة بديلة: إذا انقطع الإنترنت تماماً يعود لوقت الجهاز المحمي برمجياً
+  }
+
   void _claimDailyReward() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      DateTime now = DateTime.now();
-      String todayStr = "${now.year}-${now.month}-${now.day}";
+      // 🌐 1. جلب التوقيت العالمي الحقيقي فوراً من الـ API بدلاً من ساعة الهاتف
+      DateTime now = await _getNetworkTime();
 
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final userDocRef =
+          FirebaseFirestore.instance.collection('users').doc(user.uid);
 
-      int currentStreak = 0;
-      bool canClaim = true;
-      Duration remainingTime = Duration.zero;
+      // 2. جلب البيانات الطازجة من السيرفر فوراً عند نقرة الزر
+      final doc = await userDocRef.get();
 
       if (doc.exists && doc.data() != null) {
         Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-        currentStreak = data['streak_count'] ?? 0;
-
+        int currentStreak = data['streak_count'] ?? 0;
         if (currentStreak >= 7) {
           currentStreak = 0;
         }
 
+        // 🚨 خط الدفاع العالمي الأول: فحص الاستحقاق (24 ساعة كاملة من آخر استلام)
+        if (data.containsKey('last_daily_claim')) {
+          Timestamp lastClaimTimestamp = data['last_daily_claim'];
+          DateTime lastClaimDate = lastClaimTimestamp.toDate();
+
+          // حساب وقت الاستحقاق الحقيقي لليوم التالي
+          DateTime eligibleTime = lastClaimDate.add(const Duration(days: 1));
+
+          // لو كان الوقت العالمي الحالي "قبل" وقت الاستحقاق المسجل بالسيرفر
+          if (now.isBefore(eligibleTime)) {
+            Duration realRemaining = eligibleTime.difference(now);
+
+            // قفل النقر وطرد الغشاش فوراً بالعداد الحقيقي
+            _showErrorSnackBar(
+                "⏳ المكافأة القادمة ستكون جاهزة بعد: ${_formatDuration(realRemaining)}");
+
+            // تجميد وتحديث طابع الأمان لتسجيل المحاولة
+            await userDocRef.set({
+              'last_security_timestamp': Timestamp.fromDate(now),
+            }, SetOptions(merge: true));
+
+            return;
+          }
+        }
+
+        // 🚨 خط الدفاع الثاني: فحص الـ الرجوع للوراء في حال تزوير ساعة الهاتف ومحاولة الإفلات
         if (data.containsKey('last_security_timestamp')) {
           Timestamp lastSecurityTimestamp = data['last_security_timestamp'];
           DateTime lastSecurityDate = lastSecurityTimestamp.toDate();
 
-          if (now.isBefore(lastSecurityDate) ||
-              now.isAtSameMomentAs(lastSecurityDate)) {
+          if (now.isBefore(lastSecurityDate)) {
             _showErrorSnackBar(
                 "🚨 تم كشف تلاعب بالوقت! يرجى ضبط وقت وتاريخ الهاتف على الوضع التلقائي.");
             return;
           }
         }
 
-        if (data.containsKey('last_claim_date_str') &&
-            data['last_claim_date_str'] != null) {
-          String lastClaimStr = data['last_claim_date_str'];
+        // تثبيت الحركة الزمنية العالمية الحالية بالسيرفر
+        await userDocRef.set({
+          'last_security_timestamp': Timestamp.fromDate(now),
+        }, SetOptions(merge: true));
 
-          if (lastClaimStr == todayStr) {
-            canClaim = false;
-            DateTime tomorrow = DateTime(now.year, now.month, now.day)
-                .add(const Duration(days: 1));
-            remainingTime = tomorrow.difference(now);
-          }
-        }
-      }
-
-      if (mounted) {
-        _showRewardDialog(user.uid, currentStreak, canClaim, remainingTime);
+        // فتح واجهة الاستلام بأمان كامل
+        _showRewardDialog(user.uid, currentStreak, true, Duration.zero);
       }
     } catch (e) {
       _showErrorSnackBar(
