@@ -1501,14 +1501,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildVideoServerCard(
-          title: tr(
-              'unity_payout'), // تم تغيير الحقل ليطابق الترجمة الرقمية الجديدة (سيرفر 1)
+          title: tr('unity_payout'),
+          // ✅ تم جعل الوصف قابلاً للترجمة ويمرر النقاط الديناميكية بشكل صحيح
           sub: _unitySecondsLeft > 0
               ? "${tr('wait')} ${_formatTime(_unitySecondsLeft)}"
-              : "شاهد الفيديو واحصل على +$unityPoints نقاط فوراً",
+              : tr('watch_video_earn', args: [unityPoints.toString()]),
           points: unityPoints,
-          icon: FontAwesomeIcons
-              .gamepad, // تغيير الأيقونة لتلائم الطابع العام بدلاً من شعار يونيتي القديم
+          icon: FontAwesomeIcons.gamepad,
           remaining: unityRemaining,
           isPremium: true,
           onTap: () {
@@ -1516,15 +1515,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               if (unityRemaining <= 0) _showLimitReachedDialog();
               return;
             }
+            // 🌟 مررنا الـ cooldown الديناميكي هنا كما أصلحناه سابقاً
             _handleAdSelection(server: "unity", cooldown: cooldownSeconds);
           },
         ),
         const SizedBox(height: 20),
         _buildVideoServerCard(
-          title: tr('admob_payout'), // الترجمة الرقمية لـ (سيرفر 2)
+          title: tr('admob_payout'),
+          // ✅ تم تطبيق نفس الشيء لسيرفر أدموب
           sub: _admobSecondsLeft > 0
               ? "${tr('wait')} ${_formatTime(_admobSecondsLeft)}"
-              : "شاهد الفيديو واحصل على +$admobPoints نقاط فوراً",
+              : tr('watch_video_earn', args: [admobPoints.toString()]),
           points: admobPoints,
           icon: FontAwesomeIcons.google,
           remaining: admobRemaining,

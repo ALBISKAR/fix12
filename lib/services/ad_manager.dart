@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:startapp_sdk/startapp.dart';
@@ -7,9 +8,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class AdManager {
   // معرفات إعلانات أدموب (AdMob)
   static const String adMobBannerId = 'ca-app-pub-3359289133347380/2505476154';
-  static const String adMobRewardedId = 'ca-app-pub-3359289133347380/7487583368';
+  static const String adMobRewardedId =
+      'ca-app-pub-3359289133347380/7487583368';
   static const String appOpenAdId = 'ca-app-pub-3359289133347380/3645365681';
-  static const String adMobInterstitialId = 'ca-app-pub-3359289133347380/1879660708';
+  static const String adMobInterstitialId =
+      'ca-app-pub-3359289133347380/1879660708';
 
   // كائنات التحكم (Admob)
   static InterstitialAd? _interstitialAd;
@@ -34,7 +37,7 @@ class AdManager {
 
   // مفاتيح الأمن لقطع تداخل الإعلانات وحماية الحسابات
   static bool isShowingInterstitial = false;
-  static bool _hasAppOpenAdShownToday = false; 
+  static bool _hasAppOpenAdShownToday = false;
 
   // التحقق من الأدمن (UID الحالي الخاص بك)
   static bool get _isAdmin =>
@@ -49,7 +52,7 @@ class AdManager {
     MobileAds.instance.initialize();
     loadAppOpenAd();
     loadAdMobInterstitial();
-    
+
     // تهيئة وتجهيز إعلانات Start.io (سيرفر 1)
     _startAppSdk.setTestAdsEnabled(false); // اجعلها false للإعلانات الحقيقية
     loadServer1Ad();
@@ -60,7 +63,9 @@ class AdManager {
   // ==================== 📺 إعلانات المكافأة لـ سيرفر 1 (Start.io) ====================
 
   static void loadServer1Ad() {
-    if (_isAdmin || _isStartAppVideoLoading || _startAppRewardedVideoAd != null) return;
+    if (_isAdmin || _isStartAppVideoLoading || _startAppRewardedVideoAd != null) {
+      return;
+    }
     _isStartAppVideoLoading = true;
 
     _startAppSdk.loadRewardedVideoAd(
@@ -77,10 +82,13 @@ class AdManager {
       },
       onVideoCompleted: () async {
         debugPrint("👑 اكتمل الفيديو! جاري جلب الإعدادات السحابية...");
-        final config = await FirebaseFirestore.instance.collection('app_settings').doc('config').get();
+        final config = await FirebaseFirestore.instance
+            .collection('app_settings')
+            .doc('config')
+            .get();
         int serverCooldown = config.data()?['video_cooldown_seconds'] ?? 300;
         int serverPoints = config.data()?['unity_points'] ?? 10;
-        
+
         _assignPointsToFirestore(serverCooldown, serverPoints);
       },
     ).then((ad) {
@@ -100,8 +108,9 @@ class AdManager {
     } else {
       loadServer1Ad();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("🔄 جاري الاتصال بسيرفر 1.. اضغط مجدداً بعد ثانيتين ⏳"),
+        SnackBar(
+          content: Text(
+              tr('connecting_server_1')), // ✅ سيقرأ اللغة المناسبة تلقائياً
           backgroundColor: Colors.blueGrey,
           behavior: SnackBarBehavior.floating,
         ),
@@ -116,25 +125,29 @@ class AdManager {
     loadServer1Ad();
   }
 
-  static Future<void> _assignPointsToFirestore(int cooldownSeconds, int unityPoints) async {
+  static Future<void> _assignPointsToFirestore(
+      int cooldownSeconds, int unityPoints) async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null || _isAdmin) return;
 
-    final userDocRef = FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
-    final taskDocRef = FirebaseFirestore.instance.collection('completed_tasks').doc();
+    final userDocRef =
+        FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+    final taskDocRef =
+        FirebaseFirestore.instance.collection('completed_tasks').doc();
 
     WriteBatch batch = FirebaseFirestore.instance.batch();
-    DateTime cooldownEndTime = DateTime.now().add(Duration(seconds: cooldownSeconds));
+    DateTime cooldownEndTime =
+        DateTime.now().add(Duration(seconds: cooldownSeconds));
 
     batch.update(userDocRef, {
-      'points': FieldValue.increment(unityPoints), 
-      'unity_cooldown_until': Timestamp.fromDate(cooldownEndTime), 
+      'points': FieldValue.increment(unityPoints),
+      'unity_cooldown_until': Timestamp.fromDate(cooldownEndTime),
     });
 
     batch.set(taskDocRef, {
       'userId': currentUser.uid,
       'taskType': 'server1_ad',
-      'rewardAmount': unityPoints, 
+      'rewardAmount': unityPoints,
       'timestamp': FieldValue.serverTimestamp(),
     });
 
@@ -144,7 +157,9 @@ class AdManager {
 
   // ✅ دالة تحميل بانر Start.io في الخلفية
   static void loadStartAppBanner() {
-    if (_isAdmin || _isStartAppBannerLoading || _startAppBannerAd != null) return;
+    if (_isAdmin || _isStartAppBannerLoading || _startAppBannerAd != null) {
+      return;
+    }
     _isStartAppBannerLoading = true;
 
     _startAppSdk.loadBannerAd(StartAppBannerType.BANNER).then((ad) {
@@ -161,13 +176,13 @@ class AdManager {
   // ==================== 📐 البانر الذكي الهجين (Smart Banner) ====================
 
   static Widget smartBanner(BannerAd? adMobBanner, {bool forceAdMob = false}) {
-    if (_isAdmin) return const SizedBox.shrink(); 
-    
+    if (_isAdmin) return const SizedBox.shrink();
+
     if (adMobBanner != null) {
       return SizedBox(height: 50, child: AdWidget(ad: adMobBanner));
     }
     if (forceAdMob) return const SizedBox.shrink();
-    
+
     if (_startAppBannerAd != null) {
       return Container(
         width: double.infinity,
@@ -176,7 +191,7 @@ class AdManager {
         child: StartAppBanner(_startAppBannerAd!),
       );
     }
-    
+
     loadStartAppBanner();
     return const SizedBox.shrink();
   }
@@ -184,7 +199,12 @@ class AdManager {
   // ==================== 🔔 إعلان فتح التطبيق (App Open AdMob) ====================
 
   static void loadAppOpenAd() {
-    if (_isAdmin || _isAppOpenAdLoading || isAppOpenAdAvailable || _hasAppOpenAdShownToday) return;
+    if (_isAdmin ||
+        _isAppOpenAdLoading ||
+        isAppOpenAdAvailable ||
+        _hasAppOpenAdShownToday) {
+      return;
+    }
 
     _isAppOpenAdLoading = true;
     AppOpenAd.load(
@@ -210,7 +230,12 @@ class AdManager {
   }
 
   static void showAppOpenAdOnce() {
-    if (_isAdmin || _isShowingAppOpenAd || isShowingInterstitial || _hasAppOpenAdShownToday) return;
+    if (_isAdmin ||
+        _isShowingAppOpenAd ||
+        isShowingInterstitial ||
+        _hasAppOpenAdShownToday) {
+      return;
+    }
 
     if (!isAppOpenAdAvailable) {
       loadAppOpenAd();
@@ -220,7 +245,7 @@ class AdManager {
     _appOpenAd!.fullScreenContentCallback = FullScreenContentCallback(
       onAdShowedFullScreenContent: (ad) {
         _isShowingAppOpenAd = true;
-        _hasAppOpenAdShownToday = true; 
+        _hasAppOpenAdShownToday = true;
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
         _isShowingAppOpenAd = false;
@@ -231,7 +256,7 @@ class AdManager {
       onAdDismissedFullScreenContent: (ad) {
         _isShowingAppOpenAd = false;
         ad.dispose();
-        _appOpenAd = null; 
+        _appOpenAd = null;
       },
     );
     _appOpenAd!.show();
@@ -240,7 +265,7 @@ class AdManager {
   // ==================== 💎 الإعلانات البينية الذكية (Smart Ad) ====================
 
   static void showSmartAd() {
-    if (_isAdmin) return; 
+    if (_isAdmin) return;
 
     _clickCounter++;
     if (_clickCounter >= _adThreshold) {
@@ -249,7 +274,7 @@ class AdManager {
           onAdShowedFullScreenContent: (ad) => isShowingInterstitial = true,
           onAdDismissedFullScreenContent: (ad) {
             ad.dispose();
-            isShowingInterstitial = false; 
+            isShowingInterstitial = false;
             loadAdMobInterstitial();
           },
           onAdFailedToShowFullScreenContent: (ad, error) {
@@ -278,7 +303,7 @@ class AdManager {
   }
 
   static void loadAdMobInterstitial() {
-    if (_isAdmin) return; 
+    if (_isAdmin) return;
     InterstitialAd.load(
       adUnitId: adMobInterstitialId,
       request: const AdRequest(),
@@ -290,7 +315,11 @@ class AdManager {
   }
 
   static void loadStartAppInterstitial() {
-    if (_isAdmin || _isStartAppInterstitialLoading || _startAppInterstitialAd != null) return;
+    if (_isAdmin ||
+        _isStartAppInterstitialLoading ||
+        _startAppInterstitialAd != null) {
+      return;
+    }
     _isStartAppInterstitialLoading = true;
 
     _startAppSdk.loadInterstitialAd().then((ad) {
@@ -304,9 +333,10 @@ class AdManager {
 
   // ==================== 📺 إعلانات المكافأة لـ سيرفر 2 (AdMob) ====================
 
-  static void showAdMobVideo({required Function onReward, required Function onFailed}) {
+  static void showAdMobVideo(
+      {required Function onReward, required Function onFailed}) {
     if (_isAdmin) {
-      onReward(); 
+      onReward();
       return;
     }
     RewardedAd.load(
