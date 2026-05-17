@@ -20,7 +20,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 // ✅ استيراد ملف خدمة Start.io (سيرفر 1) الجديد
-import 'package:syria_earn_pro/services/startio_payout_service.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -132,12 +131,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _checkDailyRewardStatus(user.uid);
 
       // 1. 🔥 تهيئة وتحميل أول فيديو لـ Start.io (سيرفر 1) في الخلفية فور إقلاع الشاشة
-      StartIoPayoutService.instance.loadServer1Ad();
+      AdManager.loadServer1Ad();
 
-      // 2. 🛡️ الربط الحاسم: نربط حدث إغلاق إعلان Start.io بالمزامنة الفورية للتايمر محلياً وسحابياً
-      StartIoPayoutService.instance.onAdClosedCallback = () {
+      AdManager.onAdClosedCallback = () {
         if (mounted) {
-          // ننتظر 500 مللي ثانية للتأكد من إتمام حفظ عملية الـ WriteBatch في السيرفر ثم نحدث العداد
+          setState(() {
+            _unitySecondsLeft = 0; // تصفير محلي مؤقت لاستقبال القيمة الجديدة
+          });
+          // ننتظر 500 مللي ثانية لضمان اكتمال عملية الـ WriteBatch في السيرفر ثم نجلب التايمر الحقيقي
           Future.delayed(const Duration(milliseconds: 500), () {
             _syncCooldownFromFirebase(user.uid);
           });
@@ -355,9 +356,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           timer.cancel();
           return;
         }
-
         if (_unitySecondsLeft > 0) {
-          setState(() => _unitySecondsLeft--);
+          setState(() => _unitySecondsLeft--); // إنقاص ثانية بثانية آلياً
         } else {
           timer.cancel();
           _sendTimeNotification(tr('reward_ready_server_1'));
@@ -371,7 +371,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           timer.cancel();
           return;
         }
-
         if (_admobSecondsLeft > 0) {
           setState(() => _admobSecondsLeft--);
         } else {
@@ -397,23 +396,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _runTimer(server, duration);
   }
 
-  // ✅ إصلاح دالة المزامنة: أصبحت تقوم بتصفير العداد محلياً إذا انتهى الوقت سحابياً
+// ✅ مزامنة العداد التنازلي لسيرفر 1 وسيرفر 2 من الفايربيس بالكامل
   void _syncCooldownFromFirebase(String uid) async {
     final doc =
         await FirebaseFirestore.instance.collection('users').doc(uid).get();
     if (doc.exists && doc.data() != null) {
       final data = doc.data()!;
+
       for (String server in ["unity", "admob"]) {
-        if (data.containsKey('${server}_cooldown_until')) {
-          Timestamp timestamp = data['${server}_cooldown_until'];
+        String key = '${server}_cooldown_until';
+
+        if (data.containsKey(key) && data[key] != null) {
+          Timestamp timestamp = data[key];
           DateTime endTime = timestamp.toDate();
-          DateTime now = DateTime.now();
+          DateTime now = DateTime.now(); // ستتم المقارنة وتحديث التايمر المستقل
 
           if (endTime.isAfter(now)) {
             int remaining = endTime.difference(now).inSeconds;
-            _runTimer(server, remaining);
+            _runTimer(server, remaining); // تشغيل العداد التنازلي التناقصي
           } else {
-            // صمام أمان: إذا انتهى الوقت في السيرفر، نتأكد من تصفير الواجهة محلياً فوراً
             setState(() {
               if (server == "unity") {
                 _unitySecondsLeft = 0;
@@ -499,8 +500,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ✅ تعديل دالة المعالجة وتوجيه إعلانات سيرفر 1 لتعمل من خدمة Start.io مباشرة
-  void _handleAdSelection({required String server, int cooldown = 300}) {
+// ✅ التعديل الحاسم: جعل الـ cooldown يستقبل القيمة السحابية القادمة من الـ StreamBuilder مباشرة دون قيم افتراضية ثابتة داخل الكود
+  void _handleAdSelection({required String server, required int cooldown}) {
     if (_isAdProcessing) return;
 
     if (server == "unity") {
@@ -517,8 +518,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     if (server == "unity") {
       // 🚀 تشغيل وعرض إعلان سيرفر 1 (Start.io) الجديد فوراً عند النقر
-      StartIoPayoutService.instance.showServer1Ad(context);
-
+      AdManager.showServer1Ad(context);
     } else {
       setState(() {
         _isAdProcessing = true;
@@ -537,6 +537,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             });
 
             if (mounted) {
+              // ✅ تمرير المتغير السحابي الديناميكي هنا أيضاً لـ AdMob
               _startCooldownWithFirebase(
                   "admob", FirebaseAuth.instance.currentUser!.uid, cooldown);
               _showSuccessSnackBar(tr('admob_request_success'));
@@ -1308,9 +1309,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               }
 
                               bool isAdMob = taskData['taskType'] == 'admob_ad';
-                              String serverName = isAdMob
-                                  ? tr('admob_payout')
-                                  : tr('unity_payout');
+// ✅ فحص دقيق لنوع المهمة وعرض الترجمة المناسبة حسب ما هو مخزن في الفايربيس
+                              String serverName = "";
+                              if (taskData['taskType'] == 'admob_ad') {
+                                serverName = tr(
+                                    'admob_payout'); // يعرض "سيرفر 2" أو الاسم المترجم لأدموب
+                              } else if (taskData['taskType'] == 'server1_ad' ||
+                                  taskData['taskType'] == 'unity_ad') {
+                                serverName = tr(
+                                    'unity_payout'); // يعرض "سيرفر 1" المترجم الخاص بـ Start.io
+                              } else {
+                                serverName = taskData['taskType'] ??
+                                    ""; // أي نوع مهمة أخرى كالعروض
+                              }
 
                               int earnedPoints = taskData['rewardAmount'] ??
                                   taskData['points'] ??
