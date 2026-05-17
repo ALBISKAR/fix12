@@ -7,6 +7,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:provider/provider.dart';
+// ✅ استيراد حزمة السيرفر الجديد لإعلانات Start.io 
+import 'package:startapp_sdk/startapp.dart';
 
 // Imports الشاشات والخدمات
 import 'package:syria_earn_pro/screens/home_screen.dart';
@@ -32,6 +34,7 @@ void main() async {
   // 1. تهيئة الفايربيس واللغات أولاً لضمان تحميل الداتا
   await Firebase.initializeApp();
   await EasyLocalization.ensureInitialized();
+  
   // 2. 🛡️ جدار الحماية ضد تطبيقات النسخ والبيئات الوهمية (Cloners Detection)
   await _checkAppCloningProtection();
 
@@ -40,12 +43,15 @@ void main() async {
   bool isUserAdmin = user != null && user.uid == adminUidConst;
 
   if (!isUserAdmin) {
-    // تشغيل نظام الإعلانات فقط وحصرياً للمستخدمين العاديين لحماية حسابك
+    // 🔥 تشغيل نظام الإعلانات والتهيئة لـ Start.io وأدموب وحصرياً للمستخدمين العاديين
     MobileAds.instance.initialize();
     AdManager.initialize();
+    
+    // ✅ تهيئة السيرفر الرسمي لـ Start.io لمنع الإعلانات التجريبية العشوائية
+    StartAppSdk();
   } else {
     debugPrint(
-        "🚫 Security Alert: Admin detected! Bypassing MobileAds initialization securely.");
+        "🚫 Security Alert: Admin detected! Bypassing MobileAds & StartApp initialization securely.");
   }
 
   // إعداد قنوات التنبيهات

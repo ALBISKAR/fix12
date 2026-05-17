@@ -371,6 +371,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  // ✅ إصلاح دالة الـ Cooldown المركزية: أصبحت تُستدعى فقط عند التحقق الفعلي والناجح للمكافآت
   void _startCooldownWithFirebase(
       String server, String uid, int duration) async {
     DateTime endTime = DateTime.now().add(Duration(seconds: duration));
@@ -381,9 +382,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           Timestamp.fromDate(DateTime.now().add(const Duration(hours: 1))),
     }, SetOptions(merge: true));
 
+    // تشغيل التايمر المحلي فوراً لتحديث الواجهة بصرياً أمام المستخدم
     _runTimer(server, duration);
   }
 
+  // ✅ إصلاح دالة المزامنة: أصبحت تقوم بتصفير العداد محلياً إذا انتهى الوقت سحابياً
   void _syncCooldownFromFirebase(String uid) async {
     final doc =
         await FirebaseFirestore.instance.collection('users').doc(uid).get();
@@ -398,6 +401,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           if (endTime.isAfter(now)) {
             int remaining = endTime.difference(now).inSeconds;
             _runTimer(server, remaining);
+          } else {
+            // صمام أمان: إذا انتهى الوقت في السيرفر، نتأكد من تصفير الواجهة محلياً فوراً
+            setState(() {
+              if (server == "unity") {
+                _unitySecondsLeft = 0;
+              } else {
+                _admobSecondsLeft = 0;
+              }
+            });
           }
         }
       }
@@ -493,10 +505,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
 
     if (server == "unity") {
-      // 🚀 تشغيل إشعار فيديو سيرفر 1 (Start.io) الجديد فوراً مع تسجيل طوابع الـ Cooldown
+      // 🚀 1. تشغيل وعرض إعلان سيرفر 1 (Start.io) الجديد فوراً عند النقر
       StartIoPayoutService.instance.showServer1Ad(context);
-      _startCooldownWithFirebase(
-          "unity", FirebaseAuth.instance.currentUser!.uid, cooldown);
+
+      // ⏱️ 2. فحص ومزامنة سحابية ذكية ومؤخرة لمدة ثانيتين لالتقاط الـ Cooldown الجديد
+      // الذي يكتبه السيرفر في الفايرستور 'unity_cooldown_until' فقط إذا اكتمل الفيديو بنجاح!
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _syncCooldownFromFirebase(FirebaseAuth.instance.currentUser!.uid);
+        }
+      });
     } else {
       setState(() {
         _isAdProcessing = true;
@@ -1468,12 +1486,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildVideoServerCard(
-          title: tr('unity_payout'), // تم تغيير الحقل ليطابق الترجمة الرقمية الجديدة (سيرفر 1)
+          title: tr(
+              'unity_payout'), // تم تغيير الحقل ليطابق الترجمة الرقمية الجديدة (سيرفر 1)
           sub: _unitySecondsLeft > 0
               ? "${tr('wait')} ${_formatTime(_unitySecondsLeft)}"
               : "شاهد الفيديو واحصل على +$unityPoints نقاط فوراً",
           points: unityPoints,
-          icon: FontAwesomeIcons.gamepad, // تغيير الأيقونة لتلائم الطابع العام بدلاً من شعار يونيتي القديم
+          icon: FontAwesomeIcons
+              .gamepad, // تغيير الأيقونة لتلائم الطابع العام بدلاً من شعار يونيتي القديم
           remaining: unityRemaining,
           isPremium: true,
           onTap: () {
@@ -1961,7 +1981,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           padding: const EdgeInsets.only(top: 5),
           child: Text(sub,
               style: const TextStyle(
-                color: Colors.white70, fontSize: 14, height: 1.3)),
+                  color: Colors.white70, fontSize: 14, height: 1.3)),
         ),
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2030,7 +2050,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             final config =
                 configSnapshot.data?.data() as Map<String, dynamic>? ?? {};
             final int unitypoints = config['unity_points'] ?? 10;
-            final int admobpoints = config['admob_points'] ?? 10; // مزامنة أرباح أدموب لتصبح 10 نقاط كاملة
+            final int admobpoints = config['admob_points'] ??
+                10; // مزامنة أرباح أدموب لتصبح 10 نقاط كاملة
             final int cooldownSeconds = config['video_cooldown_seconds'] ?? 300;
             final int unityDailyLimit = config['unity_daily_limit'] ?? 20;
             final int admobDailyLimit = config['admob_daily_limit'] ?? 20;

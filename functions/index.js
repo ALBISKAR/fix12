@@ -102,7 +102,9 @@ exports.processDailyReward = onDocumentCreated("reward_requests/{requestId}", as
                 streak_count: (streak >= 6) ? 0 : streak + 1,
                 points_history: admin.firestore.FieldValue.arrayUnion({
                     taskId: `daily_${now.toISOString().split('T')[0]}`,
-                    amount: reward, type: 'daily_reward', timestamp: now
+                    amount: reward, 
+                    type: 'daily_reward', 
+                    timestamp: now
                 })
             });
 
@@ -112,7 +114,7 @@ exports.processDailyReward = onDocumentCreated("reward_requests/{requestId}", as
 });
 
 // ======================================================================
-// 3. 📺 مكافأة الإعلانات (AdMob & Unity)
+// 3. 📺 مكافأة الإعلانات (AdMob & Start.io المحدثة)
 // ======================================================================
 exports.verifytaskandaddpoints = onDocumentCreated("completed_tasks/{taskId}", async (event) => {
     const snap = event.data;
@@ -123,18 +125,29 @@ exports.verifytaskandaddpoints = onDocumentCreated("completed_tasks/{taskId}", a
 
     try {
         await db.runTransaction(async (t) => {
+            // 🔒 قانون فيربيز: يجب جلب القراءات أولاً بالترتيب
             const configDoc = await t.get(configRef);
+            const userDoc = await t.get(userRef);
+            
+            if (!userDoc.exists) return;
+
             const configData = configDoc.exists ? configDoc.data() : {};
 
-            let adLimit = (taskType === 'unity_ad') ? (configData.unity_daily_limit || 20) : (configData.admob_daily_limit || 20);
-            let adPoints = (taskType === 'unity_ad') ? (configData.unity_points || 10) : (configData.admob_points || 10);
-
-            const userDoc = await t.get(userRef);
-            if (!userDoc.exists) return;
+            // ⚙️ التحقق ودعم مسمى المعرف القديم والحديث (server1_ad لـ Start.io و admob_ad لـ سيرفر 2)
+            const isServer1 = taskType === 'server1_ad' || taskType === 'unity_ad';
+            
+            let adLimit = isServer1 ? (configData.unity_daily_limit || 20) : (configData.admob_daily_limit || 20);
+            let adPoints = isServer1 ? (configData.unity_points || 10) : (configData.admob_points || 10);
 
             const today = new Date().toISOString().split('T')[0];
             const history = userDoc.data().points_history || [];
-            const count = history.filter(i => i.type === taskType && i.timestamp?.toDate().toISOString().split('T')[0] === today).length;
+            
+            // الفحص الآمن لعدد المشاهدات اليومية لمنع ثغرات التكرار
+            const count = history.filter(i => {
+                if (!i.timestamp || (i.type !== taskType && i.type !== 'unity_ad')) return false;
+                const itemDate = (i.timestamp.toDate ? i.timestamp.toDate() : new Date(i.timestamp));
+                return itemDate.toISOString().split('T')[0] === today;
+            }).length;
 
             if (count >= adLimit) {
                 t.update(snap.ref, { status: 'rejected', reason: 'limit_reached' });
@@ -144,12 +157,16 @@ exports.verifytaskandaddpoints = onDocumentCreated("completed_tasks/{taskId}", a
             t.update(userRef, {
                 points: admin.firestore.FieldValue.increment(adPoints),
                 points_history: admin.firestore.FieldValue.arrayUnion({
-                    taskId: event.params.taskId, amount: adPoints, type: taskType, timestamp: new Date()
+                    taskId: event.params.taskId, 
+                    amount: adPoints, 
+                    type: taskType, 
+                    timestamp: new Date()
                 })
             });
+            
             t.update(snap.ref, { status: 'verified', processedAt: admin.firestore.FieldValue.serverTimestamp() });
         });
-    } catch (error) { console.error("❌ Ads Error:", error); }
+    } catch (error) { console.error("❌ Ads Verification Error:", error); }
 });
 
 // ======================================================================
@@ -179,13 +196,19 @@ exports.onUserReferralReward = onDocumentCreated("users/{userId}", async (event)
             t.update(referrerRef, {
                 points: admin.firestore.FieldValue.increment(inviterPoints),
                 points_history: admin.firestore.FieldValue.arrayUnion({
-                    taskId: `ref_bonus_${event.params.userId}`, amount: inviterPoints, type: 'referral_reward', timestamp: new Date()
+                    taskId: `ref_bonus_${event.params.userId}`, 
+                    amount: inviterPoints, 
+                    type: 'referral_reward', 
+                    timestamp: new Date()
                 })
             });
             t.update(event.data.ref, {
                 points: admin.firestore.FieldValue.increment(newPoints),
                 points_history: admin.firestore.FieldValue.arrayUnion({
-                    taskId: `welcome_bonus`, amount: newPoints, type: 'welcome_reward', timestamp: new Date()
+                    taskId: `welcome_bonus`, 
+                    amount: newPoints, 
+                    type: 'welcome_reward', 
+                    timestamp: new Date()
                 })
             });
         });
@@ -193,7 +216,7 @@ exports.onUserReferralReward = onDocumentCreated("users/{userId}", async (event)
 });
 
 // ======================================================================
-// 5. 🕒 العمليات التلقائية
+// 5. 🕒 العمليات التلقائية والمزامنة الاستاتيكية
 // ======================================================================
 exports.syncGlobalStats = onDocumentUpdated("users/{userId}", async (event) => {
     const newData = event.data.after.data();
