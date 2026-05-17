@@ -28,9 +28,25 @@ class _SplashScreenState extends State<SplashScreen> {
     _startAppInitialization();
   }
 
-  // 🟢 نقطة الانطلاق الموحدة
+// 🟢 نقطة الانطلاق الموحدة (محدثة لتخطي الانتظار للأدمن)
   void _startAppInitialization() {
-    // 1. تشغيل عداد خط التحميل (10 ثوانٍ)
+    final currentUser = FirebaseAuth.instance.currentUser;
+    const String adminUid = "OeEwi4nMZrPjRLRiqWf1373btQT2";
+
+    // 🛡️ خط دفاع الأدمن السريع: إذا كنت أنت الأدمن، تجاوز الانتظار والتحميل فوراً
+    if (currentUser != null && currentUser.uid == adminUid) {
+      debugPrint("🚀 Admin Detected: Skipping Splash screen timer delay.");
+      if (mounted) {
+        setState(() {
+          _progress = 1.0; // اكتمال الخط وهمياً فوراً
+        });
+      }
+      _proceedToNextScreen(currentUser);
+      _performBackgroundTasks(); // معالجة المهام الخلفية الضرورية دون تأخير
+      return;
+    }
+
+    // 1. تشغيل عداد خط التحميل الطبيعي للمستخدمين (10 ثوانٍ) كما هو
     _timer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
       if (mounted) {
         setState(() {
@@ -38,14 +54,13 @@ class _SplashScreenState extends State<SplashScreen> {
             _progress += 0.01;
           } else {
             _timer?.cancel();
-            // الانتقال يحدث فقط عند اكتمال الخط 100%
             _proceedToNextScreen(FirebaseAuth.instance.currentUser);
           }
         });
       }
     });
 
-    // 2. تشغيل العمليات الخلفية (إعلانات + أمان) بشكل متوازي
+    // 2. تشغيل العمليات الخلفية للمستخدمين بشكل متوازي
     _performBackgroundTasks();
   }
 
