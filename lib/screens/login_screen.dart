@@ -122,30 +122,37 @@ class _LoginScreenState extends State<LoginScreen> {
             ],
           ),
           actions: [
-            Column(
-              children: [
-                Spacer(),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.amber,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+            // ✅ تم إصلاح الانهيار الهيكلي: إزالة الـ Spacer الخاطئ وضبط أبعاد الأزرار
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.amber,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () => _launchStoreUrl(),
+                      child: Text(tr('update_now'),
+                          style: const TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.bold)),
                     ),
-                    onPressed: () => _launchStoreUrl(),
-                    child: Text(tr('update_now'),
-                        style: const TextStyle(
-                            color: Colors.black, fontWeight: FontWeight.bold)),
                   ),
-                ),
-                if (!isMandatory)
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(tr('later'),
-                        style: const TextStyle(color: Colors.white54)),
-                  ),
-              ],
+                  if (!isMandatory) ...[
+                    const SizedBox(height: 5),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(tr('later'),
+                          style: const TextStyle(color: Colors.white54)),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ],
         ),
@@ -218,7 +225,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _signInWithGoogle() async {
-    // حفظ المسنجر مسبقاً قبل الفجوات الزمنية لحمايته برمجياً
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     try {
@@ -274,25 +280,24 @@ class _LoginScreenState extends State<LoginScreen> {
             FirebaseFirestore.instance.collection('users').doc(user.uid);
         final docSnapshot = await userDocRef.get();
 
-        // 1. 🛡️ فحص قفل "مشاهدة الفيديو" (حماية مسح البيانات)
         if (docSnapshot.exists &&
             docSnapshot.data()!.containsKey('login_lock_until')) {
-          Timestamp lockTimestamp = docSnapshot.data()?['login_lock_until'];
-          DateTime lockDate = lockTimestamp.toDate();
-
-          if (DateTime.now().difference(lockDate).inSeconds < 3600) {
-            int remaining =
-                60 - (DateTime.now().difference(lockDate).inMinutes);
-            _showSnack(tr('restricted_access_msg',
-                namedArgs: {'minutes': remaining.toString()}));
-            await FirebaseAuth.instance.signOut();
-            await _googleSignIn.signOut();
-            setState(() => _isLoading = false);
-            return;
+          var lockData = docSnapshot.data()?['login_lock_until'];
+          if (lockData != null) {
+            Timestamp lockTimestamp = lockData as Timestamp;
+            DateTime lockDate = lockTimestamp.toDate();
+            if (DateTime.now().isBefore(lockDate)) {
+              int remaining = lockDate.difference(DateTime.now()).inMinutes;
+              _showSnack(tr('restricted_access_msg',
+                  namedArgs: {'minutes': remaining.clamp(1, 60).toString()}));
+              await FirebaseAuth.instance.signOut();
+              await _googleSignIn.signOut();
+              setState(() => _isLoading = false);
+              return;
+            }
           }
         }
 
-        // 2. 🛡️ فحص الحظر الدائم المستبق
         if (docSnapshot.exists && (docSnapshot.data()?['isBanned'] ?? false)) {
           _showSnack(tr('account_banned_msg'));
           await _googleSignIn.signOut();
@@ -301,12 +306,9 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
-        // 3. 🛡️ النظام الصارم لمكافحة الحسابات المتعددة والأجهزة المنسوخة
         if (user.uid != _adminUid) {
-          // أ- إذا كان الحساب جديداً تماماً في الفايربيس
           if (userCredential.additionalUserInfo!.isNewUser &&
               !docSnapshot.exists) {
-            // التحقق الفوري: هل هذا الجهاز يمتلك حساباً مسبقاً في السيستم؟
             final deviceQuery = await FirebaseFirestore.instance
                 .collection('users')
                 .where('device_id', isEqualTo: secureId)
@@ -314,11 +316,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 .get();
 
             if (deviceQuery.docs.isNotEmpty) {
-              // اكتشاف غشاش! يحاول فتح حساب جيميل جديد على جهاز محجوز لحساب آخر
               String originalOwnerUid = deviceQuery.docs.first.id;
 
               if (originalOwnerUid != user.uid) {
-                // حظره تلقائياً قبل دخوله للواجهة الرئيسية لحماية التطبيق
                 await userDocRef.set({
                   'name': user.displayName,
                   'email': user.email,
@@ -327,9 +327,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       'Multi-account creation attempt detected on device: $secureId',
                   'device_id': secureId,
                   'createdAt': FieldValue.serverTimestamp(),
+                  'last_login': FieldValue.serverTimestamp(),
                 }, SetOptions(merge: true));
 
-                // إرسال إشعار فوري للأدمن مع تفاصيل عملية الاحتيال
                 await sendNotificationToAdmin("🚨 كشف محاولة غش (تعدد حسابات)",
                     "المستخدم ${user.displayName} حاول إنشاء حساب جديد على جهاز مسجل مسبقاً!");
 
@@ -340,9 +340,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 return;
               }
             }
-          }
-          // ب- إذا كان الحساب قديماً ولكن تم تغيير كود الجهاز الفريد بشكل مشبوه
-          else if (docSnapshot.exists) {
+          } else if (docSnapshot.exists) {
             String? savedDeviceId = docSnapshot.data()?['device_id'];
             if (savedDeviceId != null &&
                 savedDeviceId != "" &&
@@ -354,7 +352,6 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         }
 
-        // 4. معالجة نظام الإحالة والمطالبة بالأكواد
         String myCode = user.uid.substring(0, 6).toUpperCase();
         String enteredCode = _referralController.text.trim().toUpperCase();
         bool userNotFound = !docSnapshot.exists;
@@ -392,7 +389,6 @@ class _LoginScreenState extends State<LoginScreen> {
           debugPrint("✅ تم تحديث دخول مستخدم سابق مع فحص التطابق الحركي");
         }
 
-        // 5. 🚀 عرض الإعلان والانتقال الآمن طبقاً للقاعدة الذهبية للـ Async Gaps
         if (mounted) {
           setState(() => _isLoading = false);
           AdManager.loadAppOpenAd();
@@ -530,11 +526,11 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
+          // ✅ تغليف البانر الذكي السفلية بـ SizedBox ثابت لتجنب مشاكل القيود غير المحددة
           if (FirebaseAuth.instance.currentUser?.uid != _adminUid)
-            Container(
+            SizedBox(
                 width: double.infinity,
-                height: 50,
-                alignment: Alignment.center,
+                height: 52,
                 child: AdManager.smartBanner(_loginBanner)),
         ],
       ),
@@ -576,74 +572,78 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
               ),
               actions: [
-                Column(
-                  children: [
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        ),
-                        icon: isRequestSending
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2))
-                            : const Icon(Icons.send),
-                        label: Text(tr('send_reset_request')),
-                        onPressed: isRequestSending
-                            ? null
-                            : () async {
-                                setDialogState(() => isRequestSending = true);
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 5.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                          icon: isRequestSending
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2))
+                              : const Icon(Icons.send),
+                          label: Text(tr('send_reset_request')),
+                          onPressed: isRequestSending
+                              ? null
+                              : () async {
+                                  setDialogState(() => isRequestSending = true);
 
-                                try {
-                                  final user =
-                                      FirebaseAuth.instance.currentUser;
-                                  String secureId =
-                                      await SecurityUtils.getDeviceId();
+                                  try {
+                                    final user =
+                                        FirebaseAuth.instance.currentUser;
+                                    String secureId =
+                                        await SecurityUtils.getDeviceId();
 
-                                  await FirebaseFirestore.instance
-                                      .collection('reset_requests')
-                                      .add({
-                                    'email': user?.email ?? "unknown",
-                                    'userId': user?.uid,
-                                    'device_id': secureId,
-                                    'status': 'pending',
-                                    'timestamp': FieldValue.serverTimestamp(),
-                                  });
+                                    await FirebaseFirestore.instance
+                                        .collection('reset_requests')
+                                        .add({
+                                      'email': user?.email ?? "unknown",
+                                      'userId': user?.uid,
+                                      'device_id': secureId,
+                                      'status': 'pending',
+                                      'timestamp': FieldValue.serverTimestamp(),
+                                    });
 
-                                  await FirebaseAuth.instance.signOut();
-                                  await _googleSignIn.signOut();
+                                    await FirebaseAuth.instance.signOut();
+                                    await _googleSignIn.signOut();
 
-                                  if (!context.mounted) return;
-                                  Navigator.pop(ctx);
-                                  _showSnack(tr('request_sent_success'));
-                                } catch (e) {
-                                  if (mounted) {
-                                    setDialogState(
-                                        () => isRequestSending = false);
-                                    _showSnack(tr('withdraw_error'));
+                                    if (!context.mounted) return;
+                                    Navigator.pop(ctx);
+                                    _showSnack(tr('request_sent_success'));
+                                  } catch (e) {
+                                    if (mounted) {
+                                      setDialogState(
+                                          () => isRequestSending = false);
+                                      _showSnack(tr('withdraw_error'));
+                                    }
                                   }
-                                }
-                              },
+                                },
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextButton(
-                      onPressed: () async {
-                        await FirebaseAuth.instance.signOut();
-                        await _googleSignIn.signOut();
-                        if (!context.mounted) return;
-                        Navigator.pop(ctx);
-                      },
-                      child: Text(tr('close'),
-                          style: const TextStyle(color: Colors.white54)),
-                    ),
-                  ],
+                      const SizedBox(height: 5),
+                      TextButton(
+                        onPressed: () async {
+                          await FirebaseAuth.instance.signOut();
+                          await _googleSignIn.signOut();
+                          if (!context.mounted) return;
+                          Navigator.pop(ctx);
+                        },
+                        child: Text(tr('close'),
+                            style: const TextStyle(color: Colors.white54)),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             );

@@ -13,50 +13,79 @@ class SecurityUtils {
     return digest.toString();
   }
 
-  // 2. 🛡️ دالة كشف المحاكيات (جديد)
+// ✅ دالة الحماية العبقرية: تكشف المحاكيات المتخفية بأسماء هواتف حقيقية (بدون استثناء المطور)
   static Future<bool> isEmulator() async {
     DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
 
     if (Platform.isAndroid) {
       AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
 
-      // 1. فحص المسارات والملفات المشبوهة (نظام الملفات الوهمي) 📂
+      // 🛡️ صمام أمان لهواتف سامسونغ الحقيقية القديمة (مثل J7)
+      // إذا كان الجهاز يمتلك لوحة أم معمارية تخص معالجات سامسونغ الحقيقية (مثل universal أو exynos)
+      // فإنه يهرب تماماً من فحص المحاكي لأنه جهاز حقيقي 100% مهما كان قديماً
+      String board = androidInfo.board.toLowerCase();
+      String hardware = androidInfo.hardware.toLowerCase();
+      String manufacturer = androidInfo.manufacturer.toLowerCase();
+      String brand = androidInfo.brand.toLowerCase();
+
+      bool isRealSamsungExynos = brand.contains("samsung") &&
+          (board.contains("universal") ||
+              board.contains("exynos") ||
+              hardware.contains("s5e"));
+
+      if (isRealSamsungExynos) {
+        return false; // عُبور آمن فوراً لجهاز J7 وأشباهه الحقيقية
+      }
+
+      // 1️⃣ فحص معمارية المعالج العميقة 🧠
+      // المحاكيات تعمل على الكمبيوتر بمعالجات Intel أو AMD (معمارية x86) بينما الهواتف تعمل بمعالجات ARM.
+      List<String> supportedAbis = androidInfo.supportedAbis;
+      bool isX86Architecture = supportedAbis.any((abi) =>
+          abi.toLowerCase().contains("x86") ||
+          abi.toLowerCase().contains("amd64"));
+
+      // 2️⃣ فحص ملفات النظام والمحركات الوهمية العميقة 📂
       bool hasEmulatorFiles =
           File('/system/lib/libc_malloc_debug_qemu.so').existsSync() ||
               File('/sys/qemu_trace').existsSync() ||
               File('/system/bin/qemu-props').existsSync() ||
               Directory('/dev/socket/qemud').existsSync() ||
-              Directory('/dev/qemu_pipe').existsSync();
+              Directory('/dev/qemu_pipe').existsSync() ||
+              File('/system/bin/nox-prop').existsSync() ||
+              Directory('/dev/vboxguest').existsSync() ||
+              Directory('/dev/vboxuser').existsSync();
 
-      // 2. فحص الهوية التقنية العميقة (حتى لو تم تغيير الاسم) 🆔
-      bool isEmulatorIdentity = androidInfo.fingerprint.contains("generic") ||
-          androidInfo.fingerprint.contains("vbox") ||
-          androidInfo.fingerprint
-              .contains("test-keys") || // الهواتف الرسمية تستخدم release-keys
-          androidInfo.hardware.toLowerCase().contains("goldfish") ||
-          androidInfo.hardware.toLowerCase().contains("ranchu") ||
+      // 3️⃣ فحص الحقول الجازمة التي ينسى المحاكي تزييفها (Identity) 🆔
+      bool isEmulatorIdentity = hardware.contains("goldfish") ||
+          hardware.contains("ranchu") ||
+          hardware.contains("vbox86") ||
           androidInfo.model.toLowerCase().contains("sdk_gphone") ||
-          androidInfo.manufacturer.toLowerCase().contains("genymotion");
+          manufacturer.contains("genymotion") ||
+          manufacturer.contains("bluestacks") ||
+          brand.contains("generic") ||
+          androidInfo.bootloader.toLowerCase().contains("unknown") ||
+          androidInfo.device.toLowerCase().contains("generic");
 
-      // 3. فحص التناقض في "البصمة" (التي كشفت جهازك سابقاً) 🎯
-      // لاحظنا أن جهازك ينتحل S23 ولكن بصمته "gracelte" (Note 7)
-      bool isSpoofed = androidInfo.fingerprint.contains("gracelte") ||
+      // 4️⃣ فحص التناقض في "البصمة" وتزييف الهوية (Spoofing) 🎯
+      bool isSpoofed = androidInfo.fingerprint.startsWith("generic") ||
+          androidInfo.fingerprint.contains("test-keys") ||
           androidInfo.fingerprint.contains("google_sdk");
 
-      // النتيجة النهائية
-      bool result = hasEmulatorFiles || isEmulatorIdentity || isSpoofed;
+      // 🔥 النتيجة النهائية
+      bool result = isX86Architecture ||
+          hasEmulatorFiles ||
+          isEmulatorIdentity ||
+          isSpoofed;
 
       if (result) {
         await sendSecurityReport(
-            "Advanced Emulator/VMS Detected via Filesystem");
+            "Advanced Emulator/VMS Detected via Hardware Architecture");
       }
 
       return result;
     }
     return false;
   }
-
-  
 
 // 📱 دالة جلب معرف الجهاز الفريد (Device ID)
   static Future<String> getDeviceId() async {
