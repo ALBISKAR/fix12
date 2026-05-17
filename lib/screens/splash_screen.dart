@@ -87,7 +87,7 @@ class _SplashScreenState extends State<SplashScreen> {
     final prefs = await SharedPreferences.getInstance();
 
     // محاولة عرض إعلان الفتح
-    AdManager.showAppOpenAd();
+    AdManager.showAppOpenAdOnce();
 
     // تأخير بسيط لضمان استقرار الواجهة بعد الإعلان
     await Future.delayed(const Duration(milliseconds: 500));

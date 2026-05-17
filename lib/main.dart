@@ -137,7 +137,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     bool isUserAdmin = user != null && user.uid == adminUidConst;
 
     if (state == AppLifecycleState.resumed && !isUserAdmin) {
-      AdManager.showAppOpenAd();
+      AdManager.showAppOpenAdOnce();
     }
   }
 

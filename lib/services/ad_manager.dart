@@ -20,6 +20,10 @@ class AdManager {
   static const int _adThreshold = 5;
   static DateTime? _appOpenLoadTime;
 
+  // 🛡️ مفاتيح التحكم والأمان لقطع تداخل الإعلانات ومنع الظهور عند استخدام زر القائمة الرئيسية
+  static bool isShowingInterstitial = false;
+  static bool _hasAppOpenAdShownToday = false; 
+
   // التحقق من الأدمن (UID الحالي الخاص بك)
   static bool get _isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
@@ -46,8 +50,8 @@ class AdManager {
   // ==================== إعلان فتح التطبيق (App Open) ====================
 
   static void loadAppOpenAd() {
-    // استثناء الأدمن من التحميل
-    if (_isAdmin || _isAppOpenAdLoading || isAppOpenAdAvailable) return;
+    // إذا ظهر الإعلان مرة واحدة بالفعل عند الدخول، نمنع تحميله مجدداً لتوفير البيانات والذاكرة
+    if (_isAdmin || _isAppOpenAdLoading || isAppOpenAdAvailable || _hasAppOpenAdShownToday) return;
 
     _isAppOpenAdLoading = true;
     AppOpenAd.load(
@@ -72,9 +76,12 @@ class AdManager {
     return DateTime.now().difference(_appOpenLoadTime!).inHours < 4;
   }
 
-  static void showAppOpenAd() {
-    // استثناء الأدمن من العرض
-    if (_isAdmin || _isShowingAppOpenAd) return;
+  static void showAppOpenAdOnce() {
+    // 🔒 التحقق الصارم: ارفض العرض تماماً إذا ظهر مرة واحدة عند البداية، أو إذا كان هناك إعلان بيني شغال
+    if (_isAdmin || _isShowingAppOpenAd || isShowingInterstitial || _hasAppOpenAdShownToday) {
+      debugPrint("🚫 App Open Ad Blocked: Prevented from showing on Home/Menu lifecycle return.");
+      return;
+    }
 
     if (!isAppOpenAdAvailable) {
       loadAppOpenAd();
@@ -82,7 +89,10 @@ class AdManager {
     }
 
     _appOpenAd!.fullScreenContentCallback = FullScreenContentCallback(
-      onAdShowedFullScreenContent: (ad) => _isShowingAppOpenAd = true,
+      onAdShowedFullScreenContent: (ad) {
+        _isShowingAppOpenAd = true;
+        _hasAppOpenAdShownToday = true; // 🔥 تفعيل القفل الفوري بمجرد ظهور الإعلان لأول مرة بالتطبيق
+      },
       onAdFailedToShowFullScreenContent: (ad, error) {
         _isShowingAppOpenAd = false;
         ad.dispose();
@@ -92,8 +102,7 @@ class AdManager {
       onAdDismissedFullScreenContent: (ad) {
         _isShowingAppOpenAd = false;
         ad.dispose();
-        _appOpenAd = null;
-        loadAppOpenAd();
+        _appOpenAd = null; // تفريغ الحقل لمنع تكراره نهائياً
       },
     );
     _appOpenAd!.show();
@@ -102,15 +111,29 @@ class AdManager {
   // ==================== الإعلانات البينية (Smart Ad) ====================
 
   static void showSmartAd() {
-    if (_isAdmin) return; // استثناء الأدمن
+    if (_isAdmin) return; 
 
     _clickCounter++;
     if (_clickCounter >= _adThreshold) {
       if (_interstitialAd != null) {
+        _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
+          onAdShowedFullScreenContent: (ad) {
+            isShowingInterstitial = true; // قفل لمنع ظهور إعلانات أخرى في الخلفية
+          },
+          onAdDismissedFullScreenContent: (ad) {
+            ad.dispose();
+            isShowingInterstitial = false; // فتح القفل بأمان عند الإغلاق العادي
+            loadAdMobInterstitial();
+          },
+          onAdFailedToShowFullScreenContent: (ad, error) {
+            ad.dispose();
+            isShowingInterstitial = false;
+            loadAdMobInterstitial();
+          },
+        );
         _interstitialAd!.show();
         _interstitialAd = null;
         _clickCounter = 0;
-        loadAdMobInterstitial();
       } else {
         _clickCounter = 0;
         loadAdMobInterstitial();
@@ -119,7 +142,7 @@ class AdManager {
   }
 
   static void loadAdMobInterstitial() {
-    if (_isAdmin) return; // لا تحمل الإعلان للأدمن
+    if (_isAdmin) return; 
     InterstitialAd.load(
       adUnitId: adMobInterstitialId,
       request: const AdRequest(),
@@ -135,7 +158,7 @@ class AdManager {
   static void showUnityVideo({required VoidCallback onReward, VoidCallback? onFailed}) {
     if (_isAdmin) {
       debugPrint("🎯 Admin Reward: Instant Access Granted.");
-      onReward(); // منح الجائزة للأدمن فوراً بدون إعلان
+      onReward(); 
       return;
     }
     if (!_isUnityReady) {
@@ -152,7 +175,7 @@ class AdManager {
 
   static void showAdMobVideo({required Function onReward, required Function onFailed}) {
     if (_isAdmin) {
-      onReward(); // منح الجائزة للأدمن فوراً
+      onReward(); 
       return;
     }
     RewardedAd.load(
@@ -184,7 +207,7 @@ class AdManager {
   // ==================== البانر (Banner) ====================
 
   static Widget smartBanner(BannerAd? adMobBanner, {bool forceAdMob = false}) {
-    if (_isAdmin) return const SizedBox.shrink(); // الأدمن لا يرى البانر أبداً
+    if (_isAdmin) return const SizedBox.shrink(); 
     
     if (adMobBanner != null) {
       return SizedBox(height: 50, child: AdWidget(ad: adMobBanner));
@@ -195,7 +218,6 @@ class AdManager {
   }
 
   static BannerAd createBannerAd() {
-    // ملاحظة: بما أن هذه الدالة ترجع كائن BannerAd، يفضل استدعاؤها بشرط الأدمن في الواجهة (UI)
     return BannerAd(
       adUnitId: adMobBannerId,
       size: AdSize.banner,
@@ -215,6 +237,11 @@ class AdManager {
     if (user == null || _isAdmin) return;
     try {
       final lockUntil = DateTime.now().add(const Duration(hours: 1));
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get(); // قراءة خفيفة
+
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)

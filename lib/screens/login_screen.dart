@@ -396,7 +396,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (mounted) {
           setState(() => _isLoading = false);
           AdManager.loadAppOpenAd();
-          AdManager.showAppOpenAd();
+          AdManager.showAppOpenAdOnce();
 
           await Future.delayed(const Duration(milliseconds: 300));
 

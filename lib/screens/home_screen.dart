@@ -16,11 +16,9 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:check_vpn_connection/check_vpn_connection.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'dart:convert'; // تأكد من وجود هذا الـ import في أعلى الملف للمزامنة
-import 'package:http/http.dart'
-    as http; // تأكد من وجود حزمة http في الـ pubspec
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -46,13 +44,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int admobRewardPoints = 10;
   Timer? _unityTimer;
   Timer? _admobTimer;
-  BannerAd? _adMobBanner;
 
   // 🛡️ الاستخدام الحركي الآمن لمتغير المكافأة اليومية
   bool _canClaimDaily = false;
 
   // كائن الاستماع العام لحالة الشبكة لمنع الـ Memory Leaks والتحذيرات
-  StreamSubscription? _networkSubscription;
 
   bool get isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
@@ -125,7 +121,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     Future.delayed(const Duration(seconds: 1), () {
-      AdManager.showAppOpenAd();
+      AdManager.showAppOpenAdOnce();
     });
     _startNetworkMonitoring();
     _startBanListener();
@@ -160,76 +156,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         AdManager.initialize();
-        AdManager.showAppOpenAd();
-
-        _adMobBanner = BannerAd(
-          adUnitId: AdManager.adMobBannerId,
-          size: AdSize.banner,
-          request: const AdRequest(),
-          listener: BannerAdListener(
-            onAdLoaded: (ad) {
-              if (mounted) setState(() {});
-            },
-            onAdFailedToLoad: (ad, error) {
-              ad.dispose();
-              debugPrint('❌ AdMob HomeScreen Banner Error: ${error.message}');
-            },
-          ),
-        )..load();
+        AdManager.showAppOpenAdOnce();
 
         _initNotifications();
       }
     });
-  }
-
-  void _checkDailyRewardStatus(String uid) async {
-    try {
-      DateTime now = DateTime.now();
-      String todayStr = "${now.year}-${now.month}-${now.day}";
-
-      final userDocRef =
-          FirebaseFirestore.instance.collection('users').doc(uid);
-      final doc = await userDocRef.get();
-
-      if (doc.exists && doc.data() != null) {
-        var data = doc.data()!;
-
-        if (data.containsKey('last_security_timestamp')) {
-          Timestamp lastSecurity = data['last_security_timestamp'];
-          DateTime lastSecurityDate = lastSecurity.toDate();
-
-          if (now.isBefore(lastSecurityDate)) {
-            if (mounted) {
-              setState(() {
-                _canClaimDaily = false;
-              });
-            }
-            return;
-          }
-        }
-
-        await userDocRef.set({
-          'last_security_timestamp': Timestamp.fromDate(now),
-        }, SetOptions(merge: true));
-
-        if (data.containsKey('last_claim_date_str') &&
-            data['last_claim_date_str'] != null) {
-          String lastClaimStr = data['last_claim_date_str'];
-          if (mounted) {
-            setState(() {
-              _canClaimDaily = lastClaimStr != todayStr;
-            });
-          }
-          return;
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _canClaimDaily = true;
-        });
-      }
-    } catch (_) {}
   }
 
   void _checkForUpdate() async {
@@ -346,7 +277,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _startNetworkMonitoring() {
-    _networkSubscription = Connectivity()
+    Connectivity()
         .onConnectivityChanged
         .listen((List<ConnectivityResult> results) async {
       var configDoc = await FirebaseFirestore.instance
@@ -580,10 +511,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             if (mounted) {
               _startCooldownWithFirebase(
                   "unity", FirebaseAuth.instance.currentUser!.uid, cooldown);
-              _showSuccessSnackBar("✅ تم إرسال الطلب، ستضاف النقاط قريباً");
+              _showSuccessSnackBar(tr('unity_request_success'));
             }
           } catch (e) {
-            _showErrorSnackBar("❌ خطأ في الاتصال، حاول مجدداً");
+            _showErrorSnackBar(tr('unity_connection_error'));
           } finally {
             if (mounted) {
               setState(() {
@@ -600,7 +531,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               _isAdProcessing = false;
             });
           }
-          _showErrorSnackBar("⏳ الإعلان غير جاهز، حاول مجدداً");
+          _showErrorSnackBar(tr('unity_ad_not_ready'));
         },
       );
     } else {
@@ -617,10 +548,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             if (mounted) {
               _startCooldownWithFirebase(
                   "admob", FirebaseAuth.instance.currentUser!.uid, cooldown);
-              _showSuccessSnackBar("💰 تم إرسال الطلب، ستضاف النقاط قريباً");
+              _showSuccessSnackBar(tr('admob_request_success'));
             }
           } catch (e) {
-            _showErrorSnackBar("❌ فشل إرسال الطلب، تأكد من الإنترنت");
+            _showErrorSnackBar(tr('admob_connection_error'));
           } finally {
             if (mounted) {
               setState(() {
@@ -637,7 +568,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               _isAdProcessing = false;
             });
           }
-          _showErrorSnackBar("⏳ تعذر تحميل إعلان جوجل، حاول لاحقاً");
+          _showErrorSnackBar(tr('admob_ad_not_ready'));
         },
       );
     }
@@ -899,19 +830,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Future<DateTime> _getNetworkTime() async {
+  Future<DateTime?> _getStrictNetworkTime() async {
+    // السيرفر الأول: WorldTimeAPI
     try {
-      // نستخدم الـ API عبر HTTP ليتخطى جدار حظر بروتوكولات الوقت بسوريا
       final response = await http
           .get(Uri.parse('https://worldtimeapi.org/api/timezone/Etc/UTC'))
-          .timeout(const Duration(seconds: 4));
+          .timeout(const Duration(seconds: 2));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return DateTime.parse(data['utc_datetime']); // توقيت عالمي فولاذي ونظيف
+        return DateTime.parse(data['utc_datetime']);
       }
     } catch (_) {}
-    return DateTime
-        .now(); // خطة بديلة: إذا انقطع الإنترنت تماماً يعود لوقت الجهاز المحمي برمجياً
+
+    // السيرفر الاحتياطي الثاني: TimeAPI (في حال سقوط أو حجب السيرفر الأول بسوريا)
+    try {
+      final response = await http
+          .get(Uri.parse(
+              'https://timeapi.io/api/Time/current/zone?timeZone=UTC'))
+          .timeout(const Duration(seconds: 2));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return DateTime.parse(data['dateTime']);
+      }
+    } catch (_) {}
+
+    return null; // نعود بـ null إذا كانت شبكة المستخدم مقطوعة تماماً عن العالم
   }
 
   void _claimDailyReward() async {
@@ -919,13 +862,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // 🌐 1. جلب التوقيت العالمي الحقيقي فوراً من الـ API بدلاً من ساعة الهاتف
-      DateTime now = await _getNetworkTime();
+      // ⏳ استدعاء مفتاح الترجمة للمؤشر السريع بدلاً من النص الثابت
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(tr('verifying_network_time')),
+          duration: const Duration(milliseconds: 800),
+        ),
+      );
+
+      // 1. جلب التوقيت العالمي الصارم من خوادم الوقت
+      DateTime? networkTime = await _getStrictNetworkTime();
+
+      // 🚨 استدعاء مفتاح الترجمة عند فشل الاتصال بالخوادم
+      if (networkTime == null) {
+        _showErrorSnackBar(tr('network_time_error'));
+        return;
+      }
 
       final userDocRef =
           FirebaseFirestore.instance.collection('users').doc(user.uid);
-
-      // 2. جلب البيانات الطازجة من السيرفر فوراً عند نقرة الزر
       final doc = await userDocRef.get();
 
       if (doc.exists && doc.data() != null) {
@@ -935,64 +890,47 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           currentStreak = 0;
         }
 
-        // 🚨 خط الدفاع العالمي الأول: فحص الاستحقاق (24 ساعة كاملة من آخر استلام)
+        // 🛡️ فحص الاستحقاق الصارم: هل مرت 24 ساعة كاملة في كوكب الأرض منذ آخر استلام؟
         if (data.containsKey('last_daily_claim')) {
           Timestamp lastClaimTimestamp = data['last_daily_claim'];
           DateTime lastClaimDate = lastClaimTimestamp.toDate();
 
-          // حساب وقت الاستحقاق الحقيقي لليوم التالي
+          // موعد الاستحقاق الشرعي القادم
           DateTime eligibleTime = lastClaimDate.add(const Duration(days: 1));
 
-          // لو كان الوقت العالمي الحالي "قبل" وقت الاستحقاق المسجل بالسيرفر
-          if (now.isBefore(eligibleTime)) {
-            Duration realRemaining = eligibleTime.difference(now);
+          // إذا كان توقيت السيرفر العالمي الحالي "قبل" موعد الاستحقاق
+          if (networkTime.isBefore(eligibleTime)) {
+            Duration realRemaining = eligibleTime.difference(networkTime);
 
-            // قفل النقر وطرد الغشاش فوراً بالعداد الحقيقي
+            // استدعاء الترجمة وإمرار معامل الوقت المتبقي الديناميكي
             _showErrorSnackBar(
-                "⏳ المكافأة القادمة ستكون جاهزة بعد: ${_formatDuration(realRemaining)}");
-
-            // تجميد وتحديث طابع الأمان لتسجيل المحاولة
-            await userDocRef.set({
-              'last_security_timestamp': Timestamp.fromDate(now),
-            }, SetOptions(merge: true));
-
-            return;
+                "${tr('next_reward_waiting')} ${_formatDuration(realRemaining)}");
+            return; // طرد فوري ومنع فتح أي واجهة
           }
         }
 
-        // 🚨 خط الدفاع الثاني: فحص الـ الرجوع للوراء في حال تزوير ساعة الهاتف ومحاولة الإفلات
-        if (data.containsKey('last_security_timestamp')) {
-          Timestamp lastSecurityTimestamp = data['last_security_timestamp'];
-          DateTime lastSecurityDate = lastSecurityTimestamp.toDate();
-
-          if (now.isBefore(lastSecurityDate)) {
-            _showErrorSnackBar(
-                "🚨 تم كشف تلاعب بالوقت! يرجى ضبط وقت وتاريخ الهاتف على الوضع التلقائي.");
-            return;
-          }
-        }
-
-        // تثبيت الحركة الزمنية العالمية الحالية بالسيرفر
+        // ⚡ مسمار الأمان السحابي: تحديث طابع السيرفر بوقت العملية الناجحة
         await userDocRef.set({
-          'last_security_timestamp': Timestamp.fromDate(now),
+          'last_security_timestamp': Timestamp.fromDate(networkTime),
         }, SetOptions(merge: true));
 
-        // فتح واجهة الاستلام بأمان كامل
-        _showRewardDialog(user.uid, currentStreak, true, Duration.zero);
+        // فتح واجهة الاستلام بأمان مطلق وبثقة عمياء من خوادم الوقت
+        _showRewardDialog(
+            user.uid, currentStreak, true, Duration.zero, networkTime);
       }
     } catch (e) {
-      _showErrorSnackBar(
-          "فشل الاتصال، يرجى التحقق من استقرار الشبكة والمحاولة مجدداً");
+      _showErrorSnackBar(tr('error_occurred'));
     }
   }
 
-  Future<void> _processDailyReward(
-      String uid, int rewardAmount, int currentStreak) async {
+  Future<void> _processDailyReward(String uid, int rewardAmount,
+      int currentStreak, DateTime networkTime) async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     try {
-      DateTime now = DateTime.now();
-      String todayStr = "${now.year}-${now.month}-${now.day}";
+      // 🌐 نعتمد كلياً على الوقت العالمي الممرر من خادم الوقت وليس ساعة الهاتف
+      String todayStr =
+          "${networkTime.year}-${networkTime.month}-${networkTime.day}";
 
       int nextStreak = (currentStreak >= 6) ? 0 : currentStreak + 1;
 
@@ -1000,13 +938,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'points': FieldValue.increment(rewardAmount),
         'streak_count': nextStreak,
         'last_claim_date_str': todayStr,
-        'last_daily_claim': Timestamp.fromDate(now),
-        'last_security_timestamp': Timestamp.fromDate(now),
+        'last_daily_claim':
+            Timestamp.fromDate(networkTime), // ✅ وقت عالمي حقيقي
+        'last_security_timestamp':
+            Timestamp.fromDate(networkTime), // ✅ طابع أمني عالمي حقيقي
         'points_history': FieldValue.arrayUnion([
           {
             'type': 'daily_reward_claim',
             'amount': rewardAmount,
-            'timestamp': now.toIso8601String(),
+            'timestamp': Timestamp.fromDate(
+                networkTime), // ✅ طابع زمني حركي حقيقي للسجل الموحد
           }
         ])
       });
@@ -1029,8 +970,41 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  void _showRewardDialog(
-      String uid, int streak, bool canClaim, Duration remaining) {
+  void _checkDailyRewardStatus(String uid) async {
+    try {
+      DateTime now = DateTime.now();
+      String todayStr = "${now.year}-${now.month}-${now.day}";
+
+      final userDocRef =
+          FirebaseFirestore.instance.collection('users').doc(uid);
+      final doc = await userDocRef.get();
+
+      if (doc.exists && doc.data() != null) {
+        var data = doc.data()!;
+
+        if (data.containsKey('last_claim_date_str') &&
+            data['last_claim_date_str'] != null) {
+          String lastClaimStr = data['last_claim_date_str'];
+          if (mounted) {
+            setState(() {
+              // الزر يكون متاحاً فقط إذا كان تاريخ آخر استلام نصي "لا يساوي" تاريخ اليوم الحالي
+              _canClaimDaily = lastClaimStr != todayStr;
+            });
+          }
+          return;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _canClaimDaily = true;
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _showRewardDialog(String uid, int streak, bool canClaim,
+      Duration remaining, DateTime networkTime) {
     Duration liveRemaining = remaining;
     Timer? timer;
 
@@ -1153,7 +1127,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             if (!mounted) return;
                             int rewardAmount = 10 + (streak * 5);
                             await _processDailyReward(
-                                uid, rewardAmount, streak);
+                                uid, rewardAmount, streak, networkTime);
                           },
                           child: Text(tr('claim_reward_now')),
                         )
@@ -1443,7 +1417,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           _buildTaskCard(
             tr('earn_points_offers'),
             tr('offers_wall_sub'),
-            500,
+            999,
             Icons.local_fire_department_rounded,
             () {
               Navigator.push(
@@ -1778,21 +1752,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   @override
-  void dispose() {
-    _banListener?.cancel();
-    _unityTimer?.cancel();
-    _admobTimer?.cancel();
-    _controller.dispose();
-    _tabController.dispose();
-    _adMobBanner?.dispose();
-
-    // إلغاء الاستماع لحالة الشبكة واستخدام المتغير برمجياً لحل تحذير الـ Linter
-    _networkSubscription?.cancel();
-
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
@@ -1934,14 +1893,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   ),
                 ),
-                bottomNavigationBar: (!isAdmin)
-                    ? Container(
-                        width: double.infinity,
-                        height: 50,
-                        alignment: Alignment.center,
-                        child: AdManager.smartBanner(_adMobBanner),
-                      )
-                    : null,
               ),
             );
           },
