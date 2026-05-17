@@ -32,7 +32,6 @@ void main() async {
   // 1. تهيئة الفايربيس واللغات أولاً لضمان تحميل الداتا
   await Firebase.initializeApp();
   await EasyLocalization.ensureInitialized();
-
   // 2. 🛡️ جدار الحماية ضد تطبيقات النسخ والبيئات الوهمية (Cloners Detection)
   await _checkAppCloningProtection();
 

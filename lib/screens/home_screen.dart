@@ -19,6 +19,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+// ✅ استيراد ملف خدمة Start.io (سيرفر 1) الجديد
+import 'package:syria_earn_pro/services/startio_payout_service.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -128,6 +130,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (user != null) {
       _syncCooldownFromFirebase(user.uid);
       _checkDailyRewardStatus(user.uid);
+      // 🔥 تهيئة وتحميل أول فيديو لـ Start.io (سيرفر 1) في الخلفية فور إقلاع الشاشة
+      StartIoPayoutService.instance.loadServer1Ad();
     }
     _setupPointsStream();
 
@@ -405,6 +409,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
+        key: UniqueKey(),
         content: Row(
           children: [
             const Icon(Icons.check_circle, color: Colors.white),
@@ -471,6 +476,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  // ✅ تعديل دالة المعالجة وتوجيه إعلانات سيرفر 1 لتعمل من خدمة Start.io مباشرة
   void _handleAdSelection({required String server, int cooldown = 300}) {
     if (_isAdProcessing) return;
 
@@ -486,51 +492,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     }
 
-    setState(() {
-      _isAdProcessing = true;
-      _isWaiting = true;
-    });
-
-    _startWaitingTimer();
-
     if (server == "unity") {
-      AdManager.showUnityVideo(
-        onReward: () async {
-          try {
-            await FirebaseFirestore.instance.collection('completed_tasks').add({
-              'userId': FirebaseAuth.instance.currentUser!.uid,
-              'taskType': 'unity_ad',
-              'timestamp': FieldValue.serverTimestamp(),
-              'status': 'pending',
-            });
-
-            if (mounted) {
-              _startCooldownWithFirebase(
-                  "unity", FirebaseAuth.instance.currentUser!.uid, cooldown);
-              _showSuccessSnackBar(tr('unity_request_success'));
-            }
-          } catch (e) {
-            _showErrorSnackBar(tr('unity_connection_error'));
-          } finally {
-            if (mounted) {
-              setState(() {
-                _isWaiting = false;
-                _isAdProcessing = false;
-              });
-            }
-          }
-        },
-        onFailed: () {
-          if (mounted) {
-            setState(() {
-              _isWaiting = false;
-              _isAdProcessing = false;
-            });
-          }
-          _showErrorSnackBar(tr('unity_ad_not_ready'));
-        },
-      );
+      // 🚀 تشغيل إشعار فيديو سيرفر 1 (Start.io) الجديد فوراً مع تسجيل طوابع الـ Cooldown
+      StartIoPayoutService.instance.showServer1Ad(context);
+      _startCooldownWithFirebase(
+          "unity", FirebaseAuth.instance.currentUser!.uid, cooldown);
     } else {
+      setState(() {
+        _isAdProcessing = true;
+        _isWaiting = true;
+      });
+      _startWaitingTimer();
+
       AdManager.showAdMobVideo(
         onReward: () async {
           try {
@@ -636,6 +609,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
+        key: UniqueKey(),
         content: Text(message,
             style: const TextStyle(color: Colors.white, fontSize: 14)),
         backgroundColor: Colors.red.shade700,
@@ -748,8 +722,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           {
             'type': 'daily_reward_claim',
             'amount': rewardAmount,
-            'timestamp': Timestamp.fromDate(
-                networkTime), // ✅ طابع زمني حقيقي متوافق مع شاشة السجل
+            'timestamp': Timestamp.fromDate(networkTime),
           }
         ])
       });
@@ -1113,7 +1086,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildPointsDisplay(String? uid, int exchangeRate) {
-    // تعريف كائنات التحكم خارج النطاق الحركي المتكرر لضمان استقرارها
     final PageController arcadePageController = PageController(initialPage: 0);
     int arcadeCurrentPage = 0;
     Timer? arcadeTimer;
@@ -1213,7 +1185,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
                 const SizedBox(height: 15),
 
-                // 2. 🔥 شريط سجل استلام النقاط الحركي المستقر (مع إضافة قيمة النقاط وحماية المسار الفارغ)
+                // 2. 🔥 شريط سجل استلام النقاط الحركي المستقر
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('completed_tasks')
@@ -1241,7 +1213,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       );
                     }
 
-                    // تصفية المصفوفة لمنع التكرار البصري
                     List<DocumentSnapshot> uniqueTasks = [];
                     Set<String> seenDocIds = {};
 
@@ -1255,7 +1226,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
                     return StatefulBuilder(
                       builder: (context, setLocalState) {
-                        // ⏱️ حماية ذكية: تهيئة التايمر لمرة واحدة فقط ليكون مستقراً تماماً كل ثانيتين
                         if (arcadeTimer == null || !arcadeTimer!.isActive) {
                           arcadeTimer =
                               Timer.periodic(const Duration(seconds: 2), (t) {
@@ -1292,11 +1262,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               var taskData = uniqueTasks[index].data()
                                   as Map<String, dynamic>;
 
-                              // قراءة معرّف الحساب بالحقل الصحيح (userId)
                               String taskUid =
                                   taskData['userId'] ?? taskData['uid'] ?? '';
 
-                              // حساب وقت العملية (منذ متى)
                               String timeAgo = tr('just_now');
                               if (taskData['timestamp'] != null) {
                                 Timestamp timestamp = taskData['timestamp'];
@@ -1322,12 +1290,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   ? tr('admob_payout')
                                   : tr('unity_payout');
 
-                              // 💡 تحديث جلب النقاط الصحيح: الفحص الديناميكي وجعل القيمة الافتراضية لـ AdMob هي 10 نقاط كاملة
                               int earnedPoints = taskData['rewardAmount'] ??
                                   taskData['points'] ??
                                   10;
 
-                              // صمام الأمان لمنع خطأ الـ Document Path الفارغ
                               if (taskUid.trim().isEmpty) {
                                 return Padding(
                                   padding: const EdgeInsets.symmetric(
@@ -1394,7 +1360,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 );
                               }
 
-                              // جلب الاسم الحقيقي للمستند وعرض النقاط المعدلة
                               return FutureBuilder<DocumentSnapshot>(
                                 future: FirebaseFirestore.instance
                                     .collection('users')
@@ -1503,12 +1468,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildVideoServerCard(
-          title: tr('unity_ad'),
+          title: tr('unity_payout'), // تم تغيير الحقل ليطابق الترجمة الرقمية الجديدة (سيرفر 1)
           sub: _unitySecondsLeft > 0
               ? "${tr('wait')} ${_formatTime(_unitySecondsLeft)}"
-              : tr('video_ad_sub'),
+              : "شاهد الفيديو واحصل على +$unityPoints نقاط فوراً",
           points: unityPoints,
-          icon: FontAwesomeIcons.unity,
+          icon: FontAwesomeIcons.gamepad, // تغيير الأيقونة لتلائم الطابع العام بدلاً من شعار يونيتي القديم
           remaining: unityRemaining,
           isPremium: true,
           onTap: () {
@@ -1516,16 +1481,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               if (unityRemaining <= 0) _showLimitReachedDialog();
               return;
             }
-            setState(() => _isWaiting = true);
             _handleAdSelection(server: "unity", cooldown: cooldownSeconds);
           },
         ),
         const SizedBox(height: 20),
         _buildVideoServerCard(
-          title: tr('admob_ad'),
+          title: tr('admob_payout'), // الترجمة الرقمية لـ (سيرفر 2)
           sub: _admobSecondsLeft > 0
               ? "${tr('wait')} ${_formatTime(_admobSecondsLeft)}"
-              : tr('video_ad_sub'),
+              : "شاهد الفيديو واحصل على +$admobPoints نقاط فوراً",
           points: admobPoints,
           icon: FontAwesomeIcons.google,
           remaining: admobRemaining,
@@ -1535,7 +1499,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               if (admobRemaining <= 0) _showLimitReachedDialog();
               return;
             }
-            setState(() => _isWaiting = true);
             _handleAdSelection(server: "admob", cooldown: cooldownSeconds);
           },
         ),
@@ -1586,7 +1549,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           children: [
             const SizedBox(height: 5),
             Text(sub,
-                style: const TextStyle(color: Colors.white70, fontSize: 16)),
+                style: const TextStyle(color: Colors.white70, fontSize: 13)),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -1998,7 +1961,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           padding: const EdgeInsets.only(top: 5),
           child: Text(sub,
               style: const TextStyle(
-                  color: Colors.white70, fontSize: 14, height: 1.3)),
+                color: Colors.white70, fontSize: 14, height: 1.3)),
         ),
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2067,7 +2030,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             final config =
                 configSnapshot.data?.data() as Map<String, dynamic>? ?? {};
             final int unitypoints = config['unity_points'] ?? 10;
-            final int admobpoints = config['admob_points'] ?? 5;
+            final int admobpoints = config['admob_points'] ?? 10; // مزامنة أرباح أدموب لتصبح 10 نقاط كاملة
             final int cooldownSeconds = config['video_cooldown_seconds'] ?? 300;
             final int unityDailyLimit = config['unity_daily_limit'] ?? 20;
             final int admobDailyLimit = config['admob_daily_limit'] ?? 20;
