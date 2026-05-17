@@ -394,7 +394,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // 💰 زر تعديل النقاط الجديد للأدمن
+                          // 💰 زر تعديل النقاط المبسط الجديد للأدمن
                           IconButton(
                             icon: const Icon(Icons.monetization_on_rounded,
                                 color: Colors.greenAccent),
@@ -424,110 +424,83 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // 💰 نافذة مخصصة لتحديث وتعديل نقاط المستخدم وحفظ العملية داخل السجل الموحد
+  // 💰 نافذة مخصصة ومبسطة لكتابة النقاط الجديدة الكلية للمستخدم مباشرة
   void _editUserPointsDialog(
       String uid, String currentPoints, String userName) {
-    TextEditingController pointsController = TextEditingController();
-    bool isIncrement = true; // مؤشر لتحديد إذا كانت العملية شحن أو خصم
+    TextEditingController pointsController =
+        TextEditingController(text: currentPoints);
 
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setLocalState) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A2E),
-          title: Text("تعديل نقاط: $userName",
-              style: const TextStyle(color: Colors.amber, fontSize: 16)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text("النقاط الحالية للمستخدم: $currentPoints",
-                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
-              const SizedBox(height: 15),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ChoiceChip(
-                    label: const Text("إضافة نقاط ➕",
-                        style: TextStyle(
-                            color: Colors.black, fontWeight: FontWeight.bold)),
-                    selected: isIncrement,
-                    selectedColor: Colors.greenAccent,
-                    onSelected: (val) =>
-                        setLocalState(() => isIncrement = true),
-                  ),
-                  ChoiceChip(
-                    label: const Text("خصم نقاط ➖",
-                        style: TextStyle(
-                            color: Colors.black, fontWeight: FontWeight.bold)),
-                    selected: !isIncrement,
-                    selectedColor: Colors.redAccent,
-                    onSelected: (val) =>
-                        setLocalState(() => isIncrement = false),
-                  ),
-                ],
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Text("تعديل نقاط: $userName",
+            style: const TextStyle(color: Colors.amber, fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("أدخل قيمة النقاط الكلية الجديدة مباشرة:",
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 15),
+            TextField(
+              controller: pointsController,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.05),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none),
               ),
-              const SizedBox(height: 15),
-              TextField(
-                controller: pointsController,
-                style: const TextStyle(color: Colors.white, fontSize: 20),
-                textAlign: TextAlign.center,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  hintText: "عدد النقاط الجديد المراد تعديله...",
-                  hintStyle:
-                      const TextStyle(color: Colors.white30, fontSize: 12),
-                  filled: true,
-                  fillColor: Colors.white.withValues(alpha: 0.05),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text("إلغاء")),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
-              onPressed: () async {
-                int inputPoints = int.tryParse(pointsController.text) ?? 0;
-                if (inputPoints <= 0) return;
-
-                int finalChange = isIncrement ? inputPoints : -inputPoints;
-                String logType =
-                    isIncrement ? "admin_bonus" : "admin_deduction";
-
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(uid)
-                    .update({
-                  'points': FieldValue.increment(finalChange),
-                  'points_history': FieldValue.arrayUnion([
-                    {
-                      'type': logType,
-                      'amount': finalChange,
-                      'timestamp':
-                          Timestamp.now(), // طابع زمني حقيقي للسجل الموحد
-                    }
-                  ])
-                });
-
-                if (!ctx.mounted) return;
-                Navigator.pop(ctx);
-
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content: Text("تم تعديل نقاط $userName بنجاح ✅"),
-                      behavior: SnackBarBehavior.floating),
-                );
-              },
-              child: const Text("حفظ", style: TextStyle(color: Colors.black)),
             ),
           ],
         ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text("إلغاء")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+            onPressed: () async {
+              int newPoints = int.tryParse(pointsController.text) ?? -1;
+              if (newPoints < 0) return;
+
+              int oldPoints = int.tryParse(currentPoints) ?? 0;
+              int difference = newPoints - oldPoints;
+
+              // تحديث قيمة النقاط الإجمالية وكتابة العملية في السجل الموحد
+              await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(uid)
+                  .update({
+                'points': newPoints,
+                'points_history': FieldValue.arrayUnion([
+                  {
+                    'type': difference >= 0 ? "admin_bonus" : "admin_deduction",
+                    'amount': difference,
+                    'timestamp': Timestamp.now(),
+                  }
+                ])
+              });
+
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                    content:
+                        Text("تم تحديث نقاط $userName بنجاح إلى $newPoints ✅"),
+                    behavior: SnackBarBehavior.floating),
+              );
+            },
+            child: const Text("حفظ", style: TextStyle(color: Colors.black)),
+          ),
+        ],
       ),
     );
   }
@@ -576,7 +549,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               ? DateFormat('yyyy/MM/dd - hh:mm a').format(date)
                               : "تاريخ غير معروف";
 
-                          // فحص نوع العملية لعرض إشارة مناسبة ولون متناسق
                           bool isBonus = item['type'] == 'admin_bonus' ||
                               !(item['type']
                                       ?.toString()
@@ -659,7 +631,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 fontSize: 16)));
   }
 
-// --- إصلاح الموافقة على الطلبات وفصل السحوبات عن فك القفل بشكل صحيح ---
+  // --- إصلاح الموافقة على الطلبات وفصل السحوبات عن فك القفل بشكل صحيح ---
   Widget _buildGenericRequestList(String collection) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -679,7 +651,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             var doc = snapshot.data!.docs[i];
             var data = doc.data() as Map<String, dynamic>;
 
-            // 💡 فرز وعزل ديناميكي دقيق لعناوين الكروت حسب اسم الـ Collection
             String requestTitle = "";
             String requestSubtitle = "";
 
@@ -717,10 +688,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       icon: const Icon(Icons.check_circle,
                           color: Colors.greenAccent),
                       onPressed: () async {
-                        // 1. تحديث حالة الطلب الحالي
                         await doc.reference.update({'status': 'approved'});
 
-                        // 2. إذا كنا بداخل طلبات فك القفل، نقوم بإرجاع حالة الحساب نشطة فوراً
                         if (collection == 'unlock_requests' &&
                             data['uid'] != null) {
                           await FirebaseFirestore.instance

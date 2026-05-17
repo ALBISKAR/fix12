@@ -748,7 +748,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           {
             'type': 'daily_reward_claim',
             'amount': rewardAmount,
-            'timestamp': Timestamp.fromDate(networkTime), // ✅ طابع زمني حقيقي متوافق مع شاشة السجل
+            'timestamp': Timestamp.fromDate(
+                networkTime), // ✅ طابع زمني حقيقي متوافق مع شاشة السجل
           }
         ])
       });
@@ -926,8 +927,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
                             if (!mounted) return;
                             int rewardAmount = 10 + (streak * 5);
-                            await _processDailyReward(uid, rewardAmount, streak,
-                                networkTime);
+                            await _processDailyReward(
+                                uid, rewardAmount, streak, networkTime);
                           },
                           child: Text(tr('claim_reward_now')),
                         )
@@ -1112,6 +1113,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildPointsDisplay(String? uid, int exchangeRate) {
+    // تعريف كائنات التحكم خارج النطاق الحركي المتكرر لضمان استقرارها
+    final PageController arcadePageController = PageController(initialPage: 0);
+    int arcadeCurrentPage = 0;
+    Timer? arcadeTimer;
+
     return StreamBuilder<DocumentSnapshot>(
       stream:
           FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
@@ -1135,6 +1141,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             double dollarValue = points / exchangeRate;
 
             return Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   "$points",
@@ -1152,6 +1159,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       fontWeight: FontWeight.w500),
                 ),
                 const SizedBox(height: 15),
+
+                // 1. الرسالة العالمية (Global Notification)
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('global_notifications')
@@ -1160,7 +1169,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       .snapshots(),
                   builder: (context, notifSnap) {
                     if (!notifSnap.hasData || notifSnap.data!.docs.isEmpty) {
-                      return const SizedBox(height: 40);
+                      return const SizedBox(height: 10);
                     }
 
                     var notifData = notifSnap.data!.docs.first.data()
@@ -1198,6 +1207,285 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           ),
                         ],
                       ),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 15),
+
+                // 2. 🔥 شريط سجل استلام النقاط الحركي المستقر (مع إضافة قيمة النقاط وحماية المسار الفارغ)
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('completed_tasks')
+                      .orderBy('timestamp', descending: true)
+                      .limit(10)
+                      .snapshots(),
+                  builder: (context, tasksSnap) {
+                    if (!tasksSnap.hasData || tasksSnap.data!.docs.isEmpty) {
+                      return Container(
+                        height: 42,
+                        margin: const EdgeInsets.symmetric(horizontal: 25),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.03),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.02)),
+                        ),
+                        child: Center(
+                          child: Text(
+                            tr('welcome_back'),
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 11),
+                          ),
+                        ),
+                      );
+                    }
+
+                    // تصفية المصفوفة لمنع التكرار البصري
+                    List<DocumentSnapshot> uniqueTasks = [];
+                    Set<String> seenDocIds = {};
+
+                    for (var doc in tasksSnap.data!.docs) {
+                      if (!seenDocIds.contains(doc.id)) {
+                        seenDocIds.add(doc.id);
+                        uniqueTasks.add(doc);
+                      }
+                      if (uniqueTasks.length == 5) break;
+                    }
+
+                    return StatefulBuilder(
+                      builder: (context, setLocalState) {
+                        // ⏱️ حماية ذكية: تهيئة التايمر لمرة واحدة فقط ليكون مستقراً تماماً كل ثانيتين
+                        if (arcadeTimer == null || !arcadeTimer!.isActive) {
+                          arcadeTimer =
+                              Timer.periodic(const Duration(seconds: 2), (t) {
+                            if (arcadePageController.hasClients) {
+                              arcadeCurrentPage =
+                                  (arcadeCurrentPage + 1) % uniqueTasks.length;
+                              arcadePageController.animateToPage(
+                                arcadeCurrentPage,
+                                duration: const Duration(milliseconds: 400),
+                                curve: Curves.easeInOut,
+                              );
+                              setLocalState(() {});
+                            } else {
+                              t.cancel();
+                            }
+                          });
+                        }
+
+                        return Container(
+                          height: 42,
+                          margin: const EdgeInsets.symmetric(horizontal: 25),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.03),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.02)),
+                          ),
+                          child: PageView.builder(
+                            controller: arcadePageController,
+                            itemCount: uniqueTasks.length,
+                            scrollDirection: Axis.vertical,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemBuilder: (context, index) {
+                              var taskData = uniqueTasks[index].data()
+                                  as Map<String, dynamic>;
+
+                              // قراءة معرّف الحساب بالحقل الصحيح (userId)
+                              String taskUid =
+                                  taskData['userId'] ?? taskData['uid'] ?? '';
+
+                              // حساب وقت العملية (منذ متى)
+                              String timeAgo = tr('just_now');
+                              if (taskData['timestamp'] != null) {
+                                Timestamp timestamp = taskData['timestamp'];
+                                DateTime taskTime = timestamp.toDate();
+                                Duration diff =
+                                    DateTime.now().difference(taskTime);
+
+                                if (diff.inMinutes < 1) {
+                                  timeAgo = tr('just_now');
+                                } else if (diff.inMinutes < 60) {
+                                  timeAgo =
+                                      "${diff.inMinutes} ${tr('minutes_ago')}";
+                                } else if (diff.inHours < 24) {
+                                  timeAgo =
+                                      "${diff.inHours} ${tr('hours_ago')}";
+                                } else {
+                                  timeAgo = "${diff.inDays} ${tr('days_ago')}";
+                                }
+                              }
+
+                              bool isAdMob = taskData['taskType'] == 'admob_ad';
+                              String serverName = isAdMob
+                                  ? tr('admob_payout')
+                                  : tr('unity_payout');
+
+                              // 💡 تحديث جلب النقاط الصحيح: الفحص الديناميكي وجعل القيمة الافتراضية لـ AdMob هي 10 نقاط كاملة
+                              int earnedPoints = taskData['rewardAmount'] ??
+                                  taskData['points'] ??
+                                  10;
+
+                              // صمام الأمان لمنع خطأ الـ Document Path الفارغ
+                              if (taskUid.trim().isEmpty) {
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12),
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          FaIcon(
+                                            isAdMob
+                                                ? FontAwesomeIcons.google
+                                                : FontAwesomeIcons.gamepad,
+                                            size: 13,
+                                            color: isAdMob
+                                                ? Colors.blueAccent
+                                                : Colors.amber,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          RichText(
+                                            text: TextSpan(
+                                              style: const TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  fontFamily: 'sans-serif'),
+                                              children: [
+                                                const TextSpan(
+                                                    text: "Player ",
+                                                    style: TextStyle(
+                                                        color: Colors.white70)),
+                                                TextSpan(
+                                                    text: "(+$earnedPoints) ",
+                                                    style: const TextStyle(
+                                                        color:
+                                                            Colors.greenAccent,
+                                                        fontWeight:
+                                                            FontWeight.bold)),
+                                                TextSpan(
+                                                    text: "($serverName)",
+                                                    style: TextStyle(
+                                                        color: Colors.white
+                                                            .withValues(
+                                                                alpha: 0.5))),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      Row(
+                                        children: [
+                                          Text(timeAgo,
+                                              style: const TextStyle(
+                                                  color: Colors.white38,
+                                                  fontSize: 10)),
+                                          const SizedBox(width: 6),
+                                          const Icon(Icons.check_circle_outline,
+                                              color: Colors.greenAccent,
+                                              size: 12),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+
+                              // جلب الاسم الحقيقي للمستند وعرض النقاط المعدلة
+                              return FutureBuilder<DocumentSnapshot>(
+                                future: FirebaseFirestore.instance
+                                    .collection('users')
+                                    .doc(taskUid)
+                                    .get(),
+                                builder: (context, userSnap) {
+                                  String finalName = "...";
+
+                                  if (userSnap.hasData &&
+                                      userSnap.data!.exists) {
+                                    var userData = userSnap.data!.data()
+                                        as Map<String, dynamic>?;
+                                    finalName = userData?['username'] ??
+                                        userData?['name'] ??
+                                        userData?['email']?.split('@')[0] ??
+                                        "Player";
+                                  }
+
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            FaIcon(
+                                              isAdMob
+                                                  ? FontAwesomeIcons.google
+                                                  : FontAwesomeIcons.gamepad,
+                                              size: 13,
+                                              color: isAdMob
+                                                  ? Colors.blueAccent
+                                                  : Colors.amber,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            RichText(
+                                              text: TextSpan(
+                                                style: const TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w600,
+                                                    fontFamily: 'sans-serif'),
+                                                children: [
+                                                  TextSpan(
+                                                      text: "$finalName ",
+                                                      style: const TextStyle(
+                                                          color:
+                                                              Colors.white70)),
+                                                  TextSpan(
+                                                      text: "(+$earnedPoints) ",
+                                                      style: const TextStyle(
+                                                          color: Colors
+                                                              .greenAccent,
+                                                          fontWeight:
+                                                              FontWeight.bold)),
+                                                  TextSpan(
+                                                      text: "($serverName)",
+                                                      style: TextStyle(
+                                                          color: Colors.white
+                                                              .withValues(
+                                                                  alpha: 0.5))),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        Row(
+                                          children: [
+                                            Text(
+                                              timeAgo,
+                                              style: const TextStyle(
+                                                  color: Colors.white38,
+                                                  fontSize: 10),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            const Icon(
+                                                Icons.check_circle_outline,
+                                                color: Colors.greenAccent,
+                                                size: 12),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        );
+                      },
                     );
                   },
                 ),
