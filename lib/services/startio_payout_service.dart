@@ -11,10 +11,14 @@ class StartIoPayoutService {
   StartAppRewardedVideoAd? _rewardedVideoAd;
   bool _isAdLoading = false;
 
-  /// ⚙️ تحميل الإعلان مسبقاً بناءً على المعايير الرسمية لـ Start.io
+// ✅ أضف متغير لتخزين دالة التحديث في أعلى الكلاس
+  VoidCallback? onAdClosedCallback;
+
   void loadServer1Ad() {
     if (_isAdLoading || _rewardedVideoAd != null) return;
     _isAdLoading = true;
+
+    _startAppSdk.setTestAdsEnabled(true);
 
     _startAppSdk.loadRewardedVideoAd(
       onAdNotDisplayed: () {
@@ -23,6 +27,10 @@ class StartIoPayoutService {
       },
       onAdHidden: () {
         debugPrint("🔔 قام المستخدم بإغلاق الإعلان");
+        // 🔥 تشغيل دالة التحديث فوراً عند الإغلاق لتشغيل التايمر في الواجهة
+        if (onAdClosedCallback != null) {
+          onAdClosedCallback!();
+        }
         _clearAndReload();
       },
       onVideoCompleted: () {
@@ -68,8 +76,10 @@ class StartIoPayoutService {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
-    final userDocRef = FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
-    final taskDocRef = FirebaseFirestore.instance.collection('completed_tasks').doc();
+    final userDocRef =
+        FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+    final taskDocRef =
+        FirebaseFirestore.instance.collection('completed_tasks').doc();
 
     WriteBatch batch = FirebaseFirestore.instance.batch();
 

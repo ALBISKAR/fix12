@@ -130,8 +130,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (user != null) {
       _syncCooldownFromFirebase(user.uid);
       _checkDailyRewardStatus(user.uid);
-      // 🔥 تهيئة وتحميل أول فيديو لـ Start.io (سيرفر 1) في الخلفية فور إقلاع الشاشة
+
+      // 1. 🔥 تهيئة وتحميل أول فيديو لـ Start.io (سيرفر 1) في الخلفية فور إقلاع الشاشة
       StartIoPayoutService.instance.loadServer1Ad();
+
+      // 2. 🛡️ الربط الحاسم: نربط حدث إغلاق إعلان Start.io بالمزامنة الفورية للتايمر محلياً وسحابياً
+      StartIoPayoutService.instance.onAdClosedCallback = () {
+        if (mounted) {
+          // ننتظر 500 مللي ثانية للتأكد من إتمام حفظ عملية الـ WriteBatch في السيرفر ثم نحدث العداد
+          Future.delayed(const Duration(milliseconds: 500), () {
+            _syncCooldownFromFirebase(user.uid);
+          });
+        }
+      };
     }
     _setupPointsStream();
 
@@ -505,16 +516,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
 
     if (server == "unity") {
-      // 🚀 1. تشغيل وعرض إعلان سيرفر 1 (Start.io) الجديد فوراً عند النقر
+      // 🚀 تشغيل وعرض إعلان سيرفر 1 (Start.io) الجديد فوراً عند النقر
       StartIoPayoutService.instance.showServer1Ad(context);
 
-      // ⏱️ 2. فحص ومزامنة سحابية ذكية ومؤخرة لمدة ثانيتين لالتقاط الـ Cooldown الجديد
-      // الذي يكتبه السيرفر في الفايرستور 'unity_cooldown_until' فقط إذا اكتمل الفيديو بنجاح!
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          _syncCooldownFromFirebase(FirebaseAuth.instance.currentUser!.uid);
-        }
-      });
     } else {
       setState(() {
         _isAdProcessing = true;
