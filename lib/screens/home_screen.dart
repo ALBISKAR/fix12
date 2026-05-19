@@ -1037,8 +1037,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Widget _buildHeader(String? uid, int exchangeRate) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    double rate = exchangeRate > 0 ? exchangeRate.toDouble() : 1000.0;
-    double dollarValue = totalPoints / rate;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 15),
@@ -1117,24 +1115,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   const Icon(
                     Icons.account_balance_wallet_rounded,
                     color: Colors.amber,
-                    size: 22,
+                    size: 30,
                   ),
-                  const SizedBox(width: 8),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text("$totalPoints",
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 17,
-                              color: Colors.amber)),
-                      Text("\$${dollarValue.toStringAsFixed(2)}",
-                          style: const TextStyle(
-                              fontSize: 11,
-                              color: Colors.greenAccent,
-                              fontWeight: FontWeight.w700)),
-                    ],
-                  ),
+                  const SizedBox(width: 0),
                 ],
               ),
             ),
@@ -1359,9 +1342,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                     ""; // أي نوع مهمة أخرى كالعروض
                               }
 
-                              int earnedPoints = taskData['rewardAmount'] ??
-                                  taskData['points'] ??
-                                  10;
+// 1. استخراج القيم من الفايربيس (تأكد من مطابقة أسماء الحقول في Firebase)
+                              int liveUnityPoints =
+                                  (config['unity_points'] ?? 10).toInt();
+                              int liveAdMobPoints =
+                                  (config['admob_points'] ?? 10).toInt();
+
+// 3. التحديد الديناميكي للنقاط
+                              int earnedPoints = (taskData['rewardAmount'] ??
+                                      taskData['points'] ??
+                                      (isAdMob
+                                          ? liveAdMobPoints
+                                          : liveUnityPoints))
+                                  .toInt();
 
                               if (taskUid.trim().isEmpty) {
                                 return Padding(

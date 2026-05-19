@@ -428,6 +428,12 @@ class _LoginScreenState extends State<LoginScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        // ✅ إضافة أيقونة الدعم الفني في الجهة اليسرى لسهولة الوصول
+        leading: IconButton(
+          icon: const Icon(Icons.support_agent_rounded,
+              color: Colors.amber, size: 30),
+          onPressed: _showSupportDialog, // تشغيل نافذة المراسلة المحمية
+        ),
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.language, color: Colors.amber, size: 28),
@@ -644,6 +650,177 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ],
                   ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showSupportDialog() async {
+    final TextEditingController messageController = TextEditingController();
+    bool isSending = false;
+    String? supportUid = FirebaseAuth.instance.currentUser?.uid;
+
+    // صمام أمان: إذا كان هناك مستخدم مسجل مسبقاً، نربط الرسالة بـ ID حسابه، وإلا نعتبرها رسالة لزائر مجهول
+    String deviceSecureId = await SecurityUtils.getDeviceId();
+    String docId = supportUid ?? "guest_$deviceSecureId";
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1A1A2E),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: [
+                  const Icon(Icons.support_agent_rounded,
+                      color: Colors.amber, size: 28),
+                  const SizedBox(width: 10),
+                  Text(tr('support_title'),
+                      style:
+                          const TextStyle(color: Colors.white, fontSize: 18)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr('support_desc'),
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 15),
+                  TextField(
+                    controller: messageController,
+                    maxLines: 4,
+                    maxLength: 250,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: tr('type_your_message'),
+                      hintStyle:
+                          const TextStyle(color: Colors.white24, fontSize: 13),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.05),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    TextButton(
+                      onPressed: isSending
+                          ? null
+                          : () {
+                              if (ctx.mounted) Navigator.pop(ctx);
+                            },
+                      child: Text(tr('cancel'),
+                          style: const TextStyle(color: Colors.white54)),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.amber,
+                        foregroundColor: Colors.black,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: isSending
+                          ? null
+                          : () async {
+                              String msg = messageController.text.trim();
+                              if (msg.isEmpty) {
+                                _showSnack(tr('message_empty_error'));
+                                return;
+                              }
+
+                              setDialogState(() => isSending = true);
+
+                              try {
+                                // 1. جلب سجل آخر رسالة دعم لهذا الجهاز من الفايرستور لفحص التوقيت
+                                final lastMsgDoc = await FirebaseFirestore
+                                    .instance
+                                    .collection('support_messages_cooldown')
+                                    .doc(docId)
+                                    .get();
+
+                                if (lastMsgDoc.exists &&
+                                    lastMsgDoc.data() != null) {
+                                  Timestamp? lastTime = lastMsgDoc
+                                      .data()!['last_sent_at'] as Timestamp?;
+                                  if (lastTime != null) {
+                                    DateTime eligibleTime = lastTime
+                                        .toDate()
+                                        .add(const Duration(hours: 1));
+
+                                    // 2. الحماية الصارمة: إذا لم تمر ساعة كاملة، نمنع الإرسال فوراً
+                                    if (DateTime.now().isBefore(eligibleTime)) {
+                                      int remainingMinutes = eligibleTime
+                                          .difference(DateTime.now())
+                                          .inMinutes;
+                                      _showSnack(
+                                          tr('support_cooldown_msg', args: [
+                                        remainingMinutes.clamp(1, 60).toString()
+                                      ]));
+
+                                      if (ctx.mounted) Navigator.pop(ctx);
+                                      return;
+                                    }
+                                  }
+                                }
+
+                                // 3. رفع الرسالة إلى مجموعة الدعم الفني للأدمن
+                                await FirebaseFirestore.instance
+                                    .collection('support_messages')
+                                    .add({
+                                  'senderId': supportUid ?? "GUEST",
+                                  'deviceId': deviceSecureId,
+                                  'message': msg,
+                                  'timestamp': FieldValue.serverTimestamp(),
+                                  'status': 'unread',
+                                });
+
+                                // 4. تحديث ميقات الحظر (Cooldown) لهذا المستند سحابياً ليقفل لمدة ساعة
+                                await FirebaseFirestore.instance
+                                    .collection('support_messages_cooldown')
+                                    .doc(docId)
+                                    .set({
+                                  'last_sent_at': FieldValue.serverTimestamp(),
+                                });
+
+                                if (!mounted) return;
+                                if (ctx.mounted) Navigator.pop(ctx);
+                                _showSnack(tr('message_sent_success'));
+                              } catch (e) {
+                                _showSnack(tr('error_occurred'));
+                              } finally {
+                                setDialogState(() => isSending = false);
+                              }
+                            },
+                      child: isSending
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  color: Colors.black, strokeWidth: 2),
+                            )
+                          : Text(tr('send'),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
                 ),
               ],
             );

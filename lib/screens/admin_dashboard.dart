@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -70,7 +71,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               Tab(icon: Icon(Icons.settings_suggest), text: "الإعدادات"),
               Tab(
                   icon: Icon(Icons.notifications_active),
-                  text: "الإشعارات"), // التبويب الجديد
+                  text: "الإشعارات"), // Text المتبوب الجديد
               Tab(icon: Icon(Icons.receipt_long), text: "الطلبات"),
               Tab(icon: Icon(Icons.people_alt), text: "المستخدمين"),
             ],
@@ -327,7 +328,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         behavior: SnackBarBehavior.floating));
   }
 
-  // --- تبويب الطلبات ---
+  // --- تبويب الطلبات المصلح بالكامل ---
   Widget _buildRequestsTab() {
     return ListView(
       padding: const EdgeInsets.all(15),
@@ -336,7 +337,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _buildGenericRequestList('withdrawals'),
         const SizedBox(height: 25),
         _buildSectionHeader("طلبات فك القفل 🔓"),
-        _buildGenericRequestList('unlock_requests'),
+        // ✅ تم تصحيح اسم المجموعة هنا لتتطابق تماماً مع دالة التطبيق السحابية reset_requests
+        _buildGenericRequestList('reset_requests'), 
       ],
     );
   }
@@ -582,7 +584,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // --- إصلاح وظيفة الحظر المنبثقة ---
+  // --- وظيفة الحظر المنبثقة ---
   Future<void> _toggleBan(
       String uid, bool currentStatus, String userName) async {
     bool confirm = await showDialog(
@@ -631,7 +633,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 fontSize: 16)));
   }
 
-  // --- إصلاح الموافقة على الطلبات وفصل السحوبات عن فك القفل بشكل صحيح ---
+  // --- دالة البناء المتوافقة والمصححة لقراءة طلبات السحب وفك القفل سحابياً ---
   Widget _buildGenericRequestList(String collection) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -658,9 +660,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
               requestTitle = "طلب سحب بقيمة: ${data['amount'] ?? '0'}";
               requestSubtitle = "وسيلة الدفع: ${data['method'] ?? 'غير محددة'}";
             } else {
-              requestTitle = "طلب فك قفل الحساب 🔓";
-              requestSubtitle =
-                  "السبب: ${data['reason'] ?? 'تجاوز حظر نظام الأمان'}";
+              // ✅ هنا تقرأ اللوحة طلبات فك القفل بشكل صحيح بعد إصلاح اسم المجموعة
+              String email = data['email'] ?? "مجهول";
+              String deviceId = data['device_id'] ?? "";
+              String deviceShort = deviceId.length > 20 ? "${deviceId.substring(0, 20)}..." : deviceId;
+              
+              requestTitle = "طلب فك قفل جهاز: $email 🔓";
+              requestSubtitle = "البصمة الجديدة: $deviceShort";
             }
 
             return Card(
@@ -688,17 +694,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       icon: const Icon(Icons.check_circle,
                           color: Colors.greenAccent),
                       onPressed: () async {
+                        // 1. الموافقة على حالة الطلب سحابياً
                         await doc.reference.update({'status': 'approved'});
 
-                        if (collection == 'unlock_requests' &&
-                            data['uid'] != null) {
-                          await FirebaseFirestore.instance
-                              .collection('users')
-                              .doc(data['uid'])
-                              .update({
+                        // 2. تحديث بصمة جهاز المستخدم وفك الحظر عنه فوراً
+                        String? targetUid = data['userId'] ?? data['uid'];
+                        String? newDeviceId = data['device_id'];
+
+                        if (collection == 'reset_requests' && targetUid != null) {
+                          var userUpdateMap = {
                             'isBanned': false,
                             'status': 'active',
-                          });
+                          };
+                          
+                          if (newDeviceId != null && newDeviceId.isNotEmpty) {
+                            userUpdateMap['device_id'] = newDeviceId; // حقن معرّف الجهاز الجديد لفك القفل
+                          }
+
+                          await FirebaseFirestore.instance
+                              .collection('users')
+                              .doc(targetUid)
+                              .update(userUpdateMap);
                         }
                       },
                     ),

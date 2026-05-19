@@ -12,7 +12,18 @@ class SecurityUtils {
     var digest = sha256.convert(bytes);
     return digest.toString();
   }
-
+// 🌐 دالة فحص وجود إنترنت حقيقي
+  static Future<bool> hasInternetConnection() async {
+    try {
+      final result = await InternetAddress.lookup('google.com');
+      if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
+        return true; // الإنترنت يعمل ومستقر
+      }
+    } on SocketException catch (_) {
+      return false; // لا يوجد اتصال بالإنترنت
+    }
+    return false;
+  }
 // ✅ دالة الحماية العبقرية: تكشف المحاكيات المتخفية بأسماء هواتف حقيقية (بدون استثناء المطور)
   static Future<bool> isEmulator() async {
     DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
@@ -87,24 +98,31 @@ class SecurityUtils {
     return false;
   }
 
-// 📱 دالة جلب معرف الجهاز الفريد (Device ID)
+// 📱 دالة جلب معرف الجهاز الفريد المطور (بصمة رقمية مزدوجة)
   static Future<String> getDeviceId() async {
     DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
     String rawId = "unknown_id";
 
     if (Platform.isAndroid) {
       AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
-      // نستخدم الـ id الخاص بنظام أندرويد
-      rawId = androidInfo.id;
+      
+      // 1️⃣ الحل الصحيح لـ Android ID: جلبه من خريطة البيانات لتجنب أخطاء الإصدارات الحديثة
+      String androidId = androidInfo.data['androidId']?.toString() ?? "no_android_id";
+      
+      // 2️⃣ الإضافة العبقرية: دمج موديل العتاد والأبعاد الهيكلية للجهاز لتمييز الهواتف المتطابقة
+      String hardwareSignature = "${androidInfo.hardware}_${androidInfo.model}_${androidInfo.product}";
+
+      // الهوية الكاملة للجهاز تدمج المعرف الفريد مع بصمة العتاد اللامرئية
+      rawId = "${androidId}_$hardwareSignature";
+      
     } else if (Platform.isIOS) {
       IosDeviceInfo iosInfo = await deviceInfo.iosInfo;
       rawId = iosInfo.identifierForVendor ?? "unknown_ios";
     }
 
-    // نقوم بتشفير المعرف قبل إرجاعه لزيادة الأمان
+    // نقوم بتشفير المعرف المركب لإنتاج هاش فريد ومستحيل التكرار لأجهزة مختلفة
     return hashDeviceId(rawId);
   }
-
 // دالة للتأكد من أن الجهاز غير مرتبط بحساب آخر
   static Future<bool> isDeviceAlreadyRegistered(String hashedId) async {
     final query = await FirebaseFirestore.instance
