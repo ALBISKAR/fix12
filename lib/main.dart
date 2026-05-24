@@ -1,17 +1,14 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:provider/provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:flutter/foundation.dart';
 // ✅ استيراد حزمة السيرفر الجديد لإعلانات Start.io
-import 'package:startapp_sdk/startapp.dart';
 
 // Imports الشاشات والخدمات
 import 'package:syria_earn_pro/screens/home_screen.dart';
@@ -37,25 +34,19 @@ void main() async {
 
   // 1. تهيئة الفايربيس واللغات أولاً لضمان تحميل الداتا
   await Firebase.initializeApp();
+
+// 2. 🛡️ تفعيل Firebase App Check (الدرع النووي)
+  await FirebaseAppCheck.instance.activate(
+    providerAndroid: kReleaseMode
+        ? AndroidPlayIntegrityProvider() // كائن الإنتاج (يحظر المحاكيات)
+        : AndroidDebugProvider(), // كائن التطوير (يسمح لك بالاختبار)
+  );
+
   await EasyLocalization.ensureInitialized();
 
   // 2. 🛡️ جدار الحماية ضد تطبيقات النسخ والبيئات الوهمية (Cloners Detection)
-  await _checkAppCloningProtection();
 
   // 3. 🛡️ الإصلاح الحرج: ننتظر قليلاً حتى تكتمل دورة الفايربيس للتحقق من هوية الأدمن بشكل دقيق
-  final user = FirebaseAuth.instance.currentUser;
-  bool isUserAdmin = user != null && user.uid == adminUidConst;
-
-  if (!isUserAdmin) {
-    // 🔥 تشغيل نظام الإعلانات والتهيئة لـ Start.io وأدموب وحصرياً للمستخدمين العاديين
-    MobileAds.instance.initialize();
-    AdManager.initialize();
-
-    StartAppSdk();
-  } else {
-    debugPrint(
-        "🚫 Security Alert: Admin detected! Bypassing MobileAds & StartApp initialization securely.");
-  }
 
   // إعداد قنوات التنبيهات
   await _setupNotificationChannels();
@@ -76,33 +67,6 @@ void main() async {
       ),
     ),
   );
-}
-
-// 🛡️ دالة مكافحة واصطياد برامج النسخ (Parallel Space / App Cloner)
-Future<void> _checkAppCloningProtection() async {
-  try {
-    if (Platform.isAndroid) {
-      final List<String> clonerKeywords = [
-        'parallel',
-        'dualspace',
-        'clone',
-        'virtual',
-        'multiple',
-        '2face',
-        'multi_account'
-      ];
-
-      String currentDataDir = Directory.current.path.toLowerCase();
-
-      for (String keyword in clonerKeywords) {
-        if (currentDataDir.contains(keyword)) {
-          // 🚨 تم كشف تشغيل التطبيق داخل بيئة منسوخة خبيثة! نغلق الهاتف فوراً
-          SystemNavigator.pop();
-          exit(0);
-        }
-      }
-    }
-  } catch (_) {}
 }
 
 Future<void> _setupNotificationChannels() async {

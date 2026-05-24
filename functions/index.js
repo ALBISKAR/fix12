@@ -7,15 +7,14 @@ admin.initializeApp();
 const db = admin.firestore();
 
 // ======================================================================
-// 1. 💰 دالة CPALead Postback (النسخة الآمنة والمطورة)
+// 1. 💰 دالة CPALead Postback 
 // ======================================================================
 exports.cpaleadPostback = onRequest(async (req, res) => {
     const userId = req.query.subid;
     const payout = parseFloat(req.query.payout);
-    const leadId = req.query.lead_id; // معرف العملية الفريد لمنع التكرار
-    const password = req.query.password; // كلمة المرور للتأمين
+    const leadId = req.query.lead_id;
+    const password = req.query.password;
 
-    // 🔒 تأمين بكلمة مرور (يجب مطابقتها في إعدادات CPALead)
     const MY_POSTBACK_PASSWORD = "Mhmed@0011";
     if (password !== MY_POSTBACK_PASSWORD) {
         return res.status(401).send("Unauthorized");
@@ -27,23 +26,19 @@ exports.cpaleadPostback = onRequest(async (req, res) => {
 
     try {
         const userRef = db.collection('users').doc(userId);
-        const leadRef = db.collection('processed_leads').doc(leadId); // سجل العمليات
+        const leadRef = db.collection('processed_leads').doc(leadId);
 
         await db.runTransaction(async (t) => {
-            // التحقق هل العملية تمت معالجتها مسبقاً؟
             const leadDoc = await t.get(leadRef);
-            if (leadDoc.exists) {
-                console.log(`⚠️ Lead ${leadId} already processed.`);
-                return;
-            }
+            if (leadDoc.exists) return;
 
             const userDoc = await t.get(userRef);
             if (!userDoc.exists) throw new Error("User Not Found");
 
-            const userPercentage = 0.7; // نسبة المستخدم (70%)
-            const conversionRate = 1000; // كل 1 دولار يقابله 1000 نقطة إجمالية
+            const userPercentage = 0.7; 
+            const conversionRate = 1000; 
 
-            const rewardPoints = Math.round((payout * conversionRate) * userPercentage); // تحويل الدولار لنقاط
+            const rewardPoints = Math.round((payout * conversionRate) * userPercentage); 
 
             t.update(userRef, {
                 points: admin.firestore.FieldValue.increment(rewardPoints),
@@ -55,7 +50,6 @@ exports.cpaleadPostback = onRequest(async (req, res) => {
                 })
             });
 
-            // تسجيل الـ lead_id لمنع التكرار مستقبلاً
             t.set(leadRef, {
                 userId: userId,
                 amount: rewardPoints,
@@ -65,13 +59,12 @@ exports.cpaleadPostback = onRequest(async (req, res) => {
 
         return res.status(200).send("OK");
     } catch (error) {
-        console.error("❌ CPALead Error:", error);
         return res.status(500).send("Error");
     }
 });
 
 // ======================================================================
-// 2. 🎁 المكافأة اليومية
+// 2. 🎁 المكافأة اليومية (مؤمنة 100% بتوقيت السيرفر)
 // ======================================================================
 exports.processDailyReward = onDocumentCreated("reward_requests/{requestId}", async (event) => {
     const snap = event.data;
@@ -85,23 +78,30 @@ exports.processDailyReward = onDocumentCreated("reward_requests/{requestId}", as
             if (!userDoc.exists) return;
 
             const userData = userDoc.data();
+            // استخدام وقت السيرفر الفعلي لا وقت هاتف المستخدم
+            const now = new Date(); 
             const lastClaim = userData.last_daily_claim?.toDate() || new Date(0);
-            const now = new Date();
 
+            // 🛡️ فحص الأمان (يجب أن يمر 23 ساعة على الأقل بين المطالبات)
             if (now.getTime() - lastClaim.getTime() < 23 * 60 * 60 * 1000) {
                 t.update(snap.ref, { status: 'error', reason: 'too_early' });
-                return;
+                return; // إحباط المحاولة
             }
 
             const streak = parseInt(userData.streak_count || 0);
             const reward = 10 + (streak * 5);
+            const nextStreak = (streak >= 6) ? 0 : streak + 1;
+            
+            // تاريخ اليوم بصيغة نصية لكي تقرأه واجهة التطبيق وتغلق الزر
+            const todayStr = `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
 
             t.update(userRef, {
                 points: admin.firestore.FieldValue.increment(reward),
                 last_daily_claim: admin.firestore.FieldValue.serverTimestamp(),
-                streak_count: (streak >= 6) ? 0 : streak + 1,
+                last_claim_date_str: todayStr, // ✅ مهم جداً لواجهة التطبيق
+                streak_count: nextStreak,
                 points_history: admin.firestore.FieldValue.arrayUnion({
-                    taskId: `daily_${now.toISOString().split('T')[0]}`,
+                    taskId: `daily_${todayStr}`,
                     amount: reward, 
                     type: 'daily_reward', 
                     timestamp: now
@@ -114,7 +114,7 @@ exports.processDailyReward = onDocumentCreated("reward_requests/{requestId}", as
 });
 
 // ======================================================================
-// 3. 📺 مكافأة الإعلانات (AdMob & Start.io المحدثة)
+// 3. 📺 مكافأة الإعلانات 
 // ======================================================================
 exports.verifytaskandaddpoints = onDocumentCreated("completed_tasks/{taskId}", async (event) => {
     const snap = event.data;
@@ -125,7 +125,6 @@ exports.verifytaskandaddpoints = onDocumentCreated("completed_tasks/{taskId}", a
 
     try {
         await db.runTransaction(async (t) => {
-            // 🔒 قانون فيربيز: يجب جلب القراءات أولاً بالترتيب
             const configDoc = await t.get(configRef);
             const userDoc = await t.get(userRef);
             
@@ -133,7 +132,6 @@ exports.verifytaskandaddpoints = onDocumentCreated("completed_tasks/{taskId}", a
 
             const configData = configDoc.exists ? configDoc.data() : {};
 
-            // ⚙️ التحقق ودعم مسمى المعرف القديم والحديث (server1_ad لـ Start.io و admob_ad لـ سيرفر 2)
             const isServer1 = taskType === 'server1_ad' || taskType === 'unity_ad';
             
             let adLimit = isServer1 ? (configData.unity_daily_limit || 20) : (configData.admob_daily_limit || 20);
@@ -142,7 +140,6 @@ exports.verifytaskandaddpoints = onDocumentCreated("completed_tasks/{taskId}", a
             const today = new Date().toISOString().split('T')[0];
             const history = userDoc.data().points_history || [];
             
-            // الفحص الآمن لعدد المشاهدات اليومية لمنع ثغرات التكرار
             const count = history.filter(i => {
                 if (!i.timestamp || (i.type !== taskType && i.type !== 'unity_ad')) return false;
                 const itemDate = (i.timestamp.toDate ? i.timestamp.toDate() : new Date(i.timestamp));
@@ -170,7 +167,7 @@ exports.verifytaskandaddpoints = onDocumentCreated("completed_tasks/{taskId}", a
 });
 
 // ======================================================================
-// 4. 🤝 نظام الإحالة (إصلاح منطق الإضافة)
+// 4. 🤝 نظام الإحالة 
 // ======================================================================
 exports.onUserReferralReward = onDocumentCreated("users/{userId}", async (event) => {
     const configRef = db.collection('app_settings').doc('config');
@@ -216,22 +213,75 @@ exports.onUserReferralReward = onDocumentCreated("users/{userId}", async (event)
 });
 
 // ======================================================================
-// 5. 🕒 العمليات التلقائية والمزامنة الاستاتيكية
+// 5. 🕒 العمليات التلقائية والمزامنة الاستاتيكية (بما فيها الأسبوعية)
 // ======================================================================
 exports.syncGlobalStats = onDocumentUpdated("users/{userId}", async (event) => {
     const newData = event.data.after.data();
     const prevData = event.data.before.data();
+    
     if (newData.points !== prevData.points) {
         const diff = (newData.points || 0) - (prevData.points || 0);
-        return db.collection('app_settings').doc('config').set({
-            total_points_distributed: admin.firestore.FieldValue.increment(diff),
-            daily_points: admin.firestore.FieldValue.increment(diff)
-        }, { merge: true });
+        
+        if (diff > 0) {
+            const batch = db.batch();
+
+            // ✅ تحديث نقاط التطبيق الكلية، اليومية، والأسبوعية للإحصائيات الحية
+            const configRef = db.collection('app_settings').doc('config');
+            batch.set(configRef, {
+                total_points_distributed: admin.firestore.FieldValue.increment(diff),
+                daily_points: admin.firestore.FieldValue.increment(diff),
+                weekly_points: admin.firestore.FieldValue.increment(diff)
+            }, { merge: true });
+
+            // ✅ تحديث النقاط الأسبوعية للمستخدم للوحة الشرف
+            const userRef = db.collection('users').doc(event.params.userId);
+            batch.update(userRef, {
+                weekly_points: admin.firestore.FieldValue.increment(diff)
+            });
+
+            await batch.commit();
+        }
     }
 });
 
+// ✅ تصفير الإحصائيات اليومية
 exports.resetDailyStats = onSchedule("0 0 * * *", async (event) => {
     try {
         await db.collection('app_settings').doc('config').update({ daily_points: 0 });
     } catch (err) { console.error(err); }
+});
+
+// ✅ تصفير الإحصائيات والنقاط الأسبوعية (تعمل كل يوم أحد الساعة 00:00)
+exports.resetWeeklyLeaderboard = onSchedule("0 0 * * 0", async (event) => {
+    try {
+        // تصفير إحصائية التطبيق الأسبوعية أولاً
+        await db.collection('app_settings').doc('config').update({ weekly_points: 0 });
+
+        const usersRef = db.collection('users');
+        const snapshot = await usersRef.where('weekly_points', '>', 0).get();
+
+        if (snapshot.empty) return;
+
+        let batch = db.batch();
+        let count = 0;
+
+        for (const doc of snapshot.docs) {
+            batch.update(doc.ref, { weekly_points: 0 });
+            count++;
+
+            if (count === 499) {
+                await batch.commit();
+                batch = db.batch();
+                count = 0;
+            }
+        }
+
+        if (count > 0) {
+            await batch.commit();
+        }
+        
+        console.log("✅ تم تصفير اللوحة الأسبوعية بنجاح لجميع المستخدمين.");
+    } catch (error) {
+        console.error("❌ خطأ أثناء تصفير اللوحة الأسبوعية:", error);
+    }
 });

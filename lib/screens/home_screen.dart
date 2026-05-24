@@ -17,8 +17,6 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:check_vpn_connection/check_vpn_connection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 // ✅ استيراد ملف خدمة Start.io (سيرفر 1) الجديد
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -634,10 +632,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, "0");
-    return "${twoDigits(duration.inHours)}:${twoDigits(duration.inMinutes.remainder(60))}:${twoDigits(duration.inSeconds.remainder(60))}";
-  }
 
   void _startWaitingTimer() {
     _secondsRemaining = 15;
@@ -679,149 +673,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Future<DateTime?> _getStrictNetworkTime() async {
-    try {
-      final response = await http
-          .get(Uri.parse('https://worldtimeapi.org/api/timezone/Etc/UTC'))
-          .timeout(const Duration(seconds: 2));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        return DateTime.parse(data['utc_datetime']);
-      }
-    } catch (_) {}
-
-    try {
-      final response = await http
-          .get(Uri.parse(
-              'https://timeapi.io/api/Time/current/zone?timeZone=UTC'))
-          .timeout(const Duration(seconds: 2));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        return DateTime.parse(data['dateTime']);
-      }
-    } catch (_) {}
-
-    return null;
-  }
-
-  void _claimDailyReward() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(tr('verifying_network_time')),
-          duration: const Duration(milliseconds: 800),
-        ),
-      );
-
-      DateTime? networkTime = await _getStrictNetworkTime();
-
-      if (networkTime == null) {
-        _showErrorSnackBar(tr('network_time_error'));
-        return;
-      }
-
-      final userDocRef =
-          FirebaseFirestore.instance.collection('users').doc(user.uid);
-      final doc = await userDocRef.get();
-
-      if (doc.exists && doc.data() != null) {
-        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-        int currentStreak = data['streak_count'] ?? 0;
-        if (currentStreak >= 7) {
-          currentStreak = 0;
-        }
-
-        if (data.containsKey('last_daily_claim')) {
-          Timestamp lastClaimTimestamp = data['last_daily_claim'];
-          DateTime lastClaimDate = lastClaimTimestamp.toDate();
-
-          DateTime eligibleTime = lastClaimDate.add(const Duration(days: 1));
-
-          if (networkTime.isBefore(eligibleTime)) {
-            Duration realRemaining = eligibleTime.difference(networkTime);
-
-            _showErrorSnackBar(
-                "${tr('next_reward_waiting')} ${_formatDuration(realRemaining)}");
-            return;
-          }
-        }
-
-        await userDocRef.set({
-          'last_security_timestamp': Timestamp.fromDate(networkTime),
-        }, SetOptions(merge: true));
-
-        _showRewardDialog(
-            user.uid, currentStreak, true, Duration.zero, networkTime);
-      }
-    } catch (e) {
-      _showErrorSnackBar(tr('error_occurred'));
-    }
-  }
-
-  Future<void> _processDailyReward(String uid, int rewardAmount,
-      int currentStreak, DateTime networkTime) async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
-    try {
-      String todayStr =
-          "${networkTime.year}-${networkTime.month}-${networkTime.day}";
-
-      int nextStreak = (currentStreak >= 6) ? 0 : currentStreak + 1;
-
-      await FirebaseFirestore.instance.collection('users').doc(uid).update({
-        'points': FieldValue.increment(rewardAmount),
-        'streak_count': nextStreak,
-        'last_claim_date_str': todayStr,
-        'last_daily_claim': Timestamp.fromDate(networkTime),
-        'last_security_timestamp': Timestamp.fromDate(networkTime),
-        'points_history': FieldValue.arrayUnion([
-          {
-            'type': 'daily_reward_claim',
-            'amount': rewardAmount,
-            'timestamp': Timestamp.fromDate(networkTime),
-          }
-        ])
-      });
-
-      _checkDailyRewardStatus(uid);
-
-      if (!mounted) return;
-      HapticFeedback.mediumImpact();
-
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text(tr('reward_processing_msg')),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      _showErrorSnackBar(tr('withdraw_error'));
-    }
-  }
-
+// ✅ 1. فحص هل المستخدم يحق له المطالبة (يعتمد على حقل السلسلة النصية للتاريخ المحفوظ مسبقاً)
   void _checkDailyRewardStatus(String uid) async {
     try {
-      DateTime now = DateTime.now();
+      DateTime now = DateTime.now(); // نستخدم وقت الهاتف للعرض فقط (آمن هنا لأن المنع الحقيقي في السيرفر)
       String todayStr = "${now.year}-${now.month}-${now.day}";
 
-      final userDocRef =
-          FirebaseFirestore.instance.collection('users').doc(uid);
+      final userDocRef = FirebaseFirestore.instance.collection('users').doc(uid);
       final doc = await userDocRef.get();
 
       if (doc.exists && doc.data() != null) {
         var data = doc.data()!;
-
-        if (data.containsKey('last_claim_date_str') &&
-            data['last_claim_date_str'] != null) {
+        if (data.containsKey('last_claim_date_str') && data['last_claim_date_str'] != null) {
           String lastClaimStr = data['last_claim_date_str'];
           if (mounted) {
             setState(() {
-              _canClaimDaily = lastClaimStr != todayStr;
+              // يحق له المطالبة إذا كان تاريخ اليوم مختلفاً عن تاريخ آخر مطالبة
+              _canClaimDaily = lastClaimStr != todayStr; 
             });
           }
           return;
@@ -836,150 +704,47 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     } catch (_) {}
   }
 
-  void _showRewardDialog(String uid, int streak, bool canClaim,
-      Duration remaining, DateTime networkTime) {
-    Duration liveRemaining = remaining;
-    Timer? timer;
+  // ✅ 2. المطالبة بالمكافأة (طلب بسيط للسيرفر)
+  void _claimDailyReward() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            if (!canClaim && timer == null) {
-              timer = Timer.periodic(const Duration(seconds: 1), (t) {
-                if (liveRemaining.inSeconds > 0) {
-                  if (context.mounted) {
-                    setDialogState(() {
-                      liveRemaining =
-                          liveRemaining - const Duration(seconds: 1);
-                    });
-                  }
-                } else {
-                  if (context.mounted) {
-                    setDialogState(() {
-                      canClaim = true;
-                    });
-                  }
-                  t.cancel();
-                }
-              });
-            }
+    if (!_canClaimDaily) {
+      _showErrorSnackBar(tr('reward_claimed')); // تم استلام المكافأة مسبقاً
+      return;
+    }
 
-            return AlertDialog(
-              backgroundColor: const Color(0xFF1A1A2E),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-                side: BorderSide(color: Colors.amber.withValues(alpha: 0.3)),
-              ),
-              title: Text(tr('daily_streak'),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(canClaim ? Icons.card_giftcard : Icons.timer_outlined,
-                        color: Colors.amber, size: 50),
-                    const SizedBox(height: 10),
-                    Text(
-                        canClaim
-                            ? tr('daily_reward_ready')
-                            : tr('next_reward_in'),
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 14)),
-                    const SizedBox(height: 8),
-                    Text(
-                      canClaim
-                          ? "${10 + (streak * 5)} ${tr('points')}"
-                          : _formatDuration(liveRemaining),
-                      style: const TextStyle(
-                          color: Colors.amber,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace'),
-                    ),
-                    const SizedBox(height: 15),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: List.generate(7, (index) {
-                          bool isPast = index < streak;
-                          bool isCurrent = index == streak;
-                          return Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 4),
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: isCurrent
-                                  ? Colors.amber
-                                  : (isPast
-                                      ? Colors.green.withValues(alpha: 0.4)
-                                      : Colors.white10),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Column(
-                              children: [
-                                Text("${tr('day')} ${index + 1}",
-                                    style: TextStyle(
-                                        color: isCurrent
-                                            ? Colors.black
-                                            : Colors.white60,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.bold)),
-                                Text("${10 + (index * 5)}",
-                                    style: TextStyle(
-                                        color: isCurrent
-                                            ? Colors.black
-                                            : Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12)),
-                              ],
-                            ),
-                          );
-                        }),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                Center(
-                  child: canClaim
-                      ? ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.amber,
-                              foregroundColor: Colors.black,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12))),
-                          onPressed: () async {
-                            AdManager.showSmartAd();
-                            timer?.cancel();
-                            Navigator.pop(ctx);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(tr('processing')),
+        duration: const Duration(seconds: 1),
+      ),
+    );
 
-                            if (!mounted) return;
-                            int rewardAmount = 10 + (streak * 5);
-                            await _processDailyReward(
-                                uid, rewardAmount, streak, networkTime);
-                          },
-                          child: Text(tr('claim_reward_now')),
-                        )
-                      : TextButton(
-                          onPressed: () {
-                            AdManager.showSmartAd();
-                            timer?.cancel();
-                            Navigator.pop(ctx);
-                          },
-                          child: Text(tr('close'),
-                              style: const TextStyle(color: Colors.white54)),
-                        ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    ).then((_) => timer?.cancel());
+    try {
+      // 🚀 إرسال طلب للسيرفر: السيرفر سيتكفل بكل شيء (الوقت الحقيقي، الحساب، وتوزيع النقاط)
+      await FirebaseFirestore.instance.collection('reward_requests').add({
+        'userId': user.uid,
+        'timestamp': FieldValue.serverTimestamp(), // السيرفر يضع وقته الحقيقي هنا
+        'status': 'pending'
+      });
+
+      // إظهار نافذة صغيرة للمستخدم تؤكد استلام الطلب
+      if (mounted) {
+        _showSuccessSnackBar(tr('reward_processing_msg'));
+        setState(() {
+           _canClaimDaily = false; // نقفل الزر فوراً لمنع السبام
+        });
+        
+        // إغلاق الـ Drawer إذا كان مفتوحاً
+        if (Scaffold.of(context).isDrawerOpen) {
+          Navigator.pop(context);
+        }
+      }
+
+    } catch (e) {
+      _showErrorSnackBar(tr('error_occurred'));
+    }
   }
 
   Widget _buildMaintenanceScreen(String message) {
@@ -1698,7 +1463,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  void _showFakeVerificationDialog() {
+void _showFakeVerificationDialog() {
     int countdown = 60;
     Timer? timer;
 
@@ -1707,13 +1472,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (dialogContext, setDialogState) { // ✅ تم تغيير الاسم هنا ليكون دقيقاً لبيئة الدايلوج
+            
+            // تهيئة المؤقت بشكل آمن يضمن الإغلاق التلقائي دون تضارب الذاكرة
             timer ??= Timer.periodic(const Duration(seconds: 1), (t) {
+              // 🛡️ فحص حرج: التأكد أن نافذة الدايلوج ما زالت مفتوحة ونشطة في الشاشة الآن
+              if (!dialogContext.mounted) {
+                t.cancel();
+                return;
+              }
+
               if (countdown > 0) {
-                if (mounted) setDialogState(() => countdown--);
+                setDialogState(() => countdown--);
               } else {
                 t.cancel();
-                _finalizeRatingPoints(ctx);
+                // المتابعة بأمان وإغلاق النافذة من سياقها الخاص
+                _finalizeRatingPoints(dialogContext);
               }
             });
 
@@ -1730,8 +1504,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
                 title: Row(
                   children: [
-                    const Icon(Icons.verified_user_rounded,
-                        color: Colors.amber),
+                    const Icon(Icons.verified_user_rounded, color: Colors.amber),
                     const SizedBox(width: 10),
                     Text(
                       tr('verifying'),
@@ -1747,18 +1520,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     Text(
                       tr('verifying_desc'),
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 14, height: 1.5),
+                      style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
                     ),
                     const SizedBox(height: 15),
                     InkWell(
                       onTap: () async {
-                        const String url =
-                            "https://play.google.com/store/apps/details?id=com.mohamad.syria_earn";
+                        const String url = "https://play.google.com/store/apps/details?id=com.mohamad.syria_earn";
                         final Uri uri = Uri.parse(url);
                         if (await canLaunchUrl(uri)) {
-                          await launchUrl(uri,
-                              mode: LaunchMode.externalApplication);
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
                         }
                       },
                       child: Padding(
@@ -1788,10 +1558,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     const SizedBox(height: 15),
                     Text(
                       tr('verifying_points_hint'),
-                      style: const TextStyle(
-                          color: Colors.greenAccent,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold),
+                      style: const TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -1800,7 +1567,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           },
         );
       },
-    ).then((_) => timer?.cancel());
+    ).then((_) {
+      // 🛡️ إيقاف مؤكد للمؤقت عند خروج الشاشة بأي شكل لمنع تسريب الذاكرة (Memory Leak)
+      timer?.cancel();
+    });
   }
 
   void _finalizeRatingPoints(BuildContext dialogContext) async {
@@ -1808,6 +1578,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (uid.isEmpty) return;
 
     try {
+      // 1. نقوم بإغلاق نافذة الـ Dialog أولاً بشكل آمن لفك الارتباط بالواجهة
+      if (dialogContext.mounted) {
+        Navigator.pop(dialogContext);
+      }
+
+      // 2. نقوم بتحديث البيانات سحابياً في الخلفية بأمان
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'has_rated_app': true,
         'points': FieldValue.increment(25),
@@ -1820,17 +1596,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ])
       });
 
+      // 3. نتحقق من الشاشة الرئيسية الخلفية قبل إظهار رسالة النجاح للمستخدم
       if (!mounted) return;
-
-      if (dialogContext.mounted) {
-        Navigator.pop(dialogContext);
-      }
-
       _showSuccessSnackBar("${tr('success_rate')} 25 ${tr('points')}");
+
     } catch (e) {
       debugPrint("Error finalizing points: $e");
-      if (mounted && dialogContext.mounted) {
-        Navigator.pop(dialogContext);
+      // في حالة حدوث خطأ شبكة غير متوقع، نكتفي بالتنبيه دون انهيار الواجهة
+      if (mounted) {
         _showErrorSnackBar(tr('error_occurred'));
       }
     }

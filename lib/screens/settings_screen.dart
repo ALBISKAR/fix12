@@ -20,7 +20,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final User? user = FirebaseAuth.instance.currentUser;
   final TextEditingController _nameController = TextEditingController();
   bool _isUpdating = false;
-  
+
   @override
   void initState() {
     super.initState();
@@ -168,123 +168,159 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (!snapshot.hasData) return const SizedBox();
 
                 var userData = snapshot.data!.data() as Map<String, dynamic>?;
-                String referralCode = userData?['my_referral_code'] ?? "---";
+                String referralCode = userData?['my_referral_code'] ?? "";
 
-                return Column(
-                  children: [
-                    _buildSettingsTile(
-                      icon: Icons.card_giftcard,
-                      iconColor: Colors.purpleAccent,
-                      title: "${tr('ref_code')}: $referralCode",
-                      subtitle: tr('ref_subtitle'),
-                      trailing: FutureBuilder<QuerySnapshot>(
-                        future: FirebaseFirestore.instance
-                            .collection('users')
-                            .where('referred_by', isEqualTo: referralCode)
-                            .limit(50)
-                            .get(),
-                        builder: (context, countSnapshot) {
-                          int count = countSnapshot.data?.docs.length ?? 0;
+// 🛠️ الإصلاح الذكي (Self-Healing): إذا كان الكود مفقوداً يتم إنشاؤه وحفظه فوراً
+                if (referralCode.isEmpty || referralCode == "---") {
+                  referralCode = FirebaseAuth.instance.currentUser != null &&
+                          FirebaseAuth.instance.currentUser!.uid.length >= 6
+                      ? FirebaseAuth.instance.currentUser!.uid
+                          .substring(0, 6)
+                          .toUpperCase()
+                      : "USER00";
 
-                          return GestureDetector(
-                            onTap: () {
-                              if (count > 0) {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => FriendsListScreen(
-                                        referralCode: referralCode),
-                                  ),
-                                );
-                              } else {
-                                _showSnack(tr('no_friends_yet'));
-                              }
-                            },
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 500),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: count > 0
-                                    ? Colors.purpleAccent
-                                        .withValues(alpha: 0.15)
-                                    : Colors.white.withValues(alpha: 0.05),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: count > 0
-                                      ? Colors.purpleAccent
-                                          .withValues(alpha: 0.5)
-                                      : Colors.transparent,
-                                  width: 1,
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  GestureDetector(
-                                    onTap: () async {
-                                      String shareMsg =
-                                          "${tr('share_msg_header')}\n\n"
-                                          "${tr('ref_code')}: $referralCode\n\n"
-                                          "${tr('share_msg_download')}:\n"
-                                          "https://play.google.com/store/apps/details?id=your.package.name";
+                  // حفظه في الفايربيس في الخلفية لضمان إصلاح حساب المستخدم بالكامل
+                  FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(FirebaseAuth.instance.currentUser?.uid)
+                      .set({'my_referral_code': referralCode},
+                          SetOptions(merge: true));
+                }
 
-                                      await SharePlus.instance.share(
-                                        ShareParams(
-                                            text:
-                                                shareMsg), // 👈 الحل المعتمد والمحفوظ
-                                      );
-                                      HapticFeedback.lightImpact();
-                                    },
-                                    child: Icon(
-                                      Icons.share_rounded,
-                                      size: 15,
-                                      color: count > 0
-                                          ? Colors.white
-                                          : Colors.white38,
-                                    ),
-                                  ),
-                                  Container(
-                                    height: 12,
-                                    width: 1,
-                                    margin: const EdgeInsets.symmetric(
-                                        horizontal: 8),
-                                    color: Colors.white.withValues(alpha: 0.1),
-                                  ),
-                                  Icon(
-                                    Icons.people_alt_rounded,
-                                    size: 14,
+                // ✅ 1. أضفنا StreamBuilder جديد لجلب إعدادات التطبيق (config) لقراءة النقاط
+                return StreamBuilder<DocumentSnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('app_settings')
+                      .doc('config')
+                      .snapshots(),
+                  builder: (context, configSnapshot) {
+                    // ✅ 2. استخراج قيمة الإحالة من الفايربيس (مع وضع 50 كقيمة افتراضية)
+                    int inviterPoints = 50;
+                    if (configSnapshot.hasData && configSnapshot.data!.exists) {
+                      var configData =
+                          configSnapshot.data!.data() as Map<String, dynamic>?;
+                      inviterPoints =
+                          configData?['referral_reward_inviter'] ?? 50;
+                    }
+
+                    return Column(
+                      children: [
+                        _buildSettingsTile(
+                          icon: Icons.card_giftcard,
+                          iconColor: Colors.purpleAccent,
+                          title: "${tr('ref_code')}: $referralCode",
+                          // ✅ 3. دمج النص المترجم مع النقاط المسحوبة من الفايربيس
+                          subtitle: "${tr('ref_subtitle')} (+$inviterPoints)",
+                          trailing: FutureBuilder<QuerySnapshot>(
+                            future: FirebaseFirestore.instance
+                                .collection('users')
+                                .where('referred_by', isEqualTo: referralCode)
+                                .limit(50)
+                                .get(),
+                            builder: (context, countSnapshot) {
+                              int count = countSnapshot.data?.docs.length ?? 0;
+
+                              return GestureDetector(
+                                onTap: () {
+                                  if (count > 0) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => FriendsListScreen(
+                                            referralCode: referralCode),
+                                      ),
+                                    );
+                                  } else {
+                                    _showSnack(tr('no_friends_yet'));
+                                  }
+                                },
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 500),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
                                     color: count > 0
                                         ? Colors.purpleAccent
-                                        : Colors.white38,
-                                  ),
-                                  const SizedBox(width: 5),
-                                  Text(
-                                    "$count",
-                                    style: TextStyle(
+                                            .withValues(alpha: 0.15)
+                                        : Colors.white.withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
                                       color: count > 0
-                                          ? Colors.white
-                                          : Colors.white38,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13,
+                                          ? Colors.purpleAccent
+                                              .withValues(alpha: 0.5)
+                                          : Colors.transparent,
+                                      width: 1,
                                     ),
                                   ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      onTap: () {
-                        if (referralCode != "---") {
-                          Clipboard.setData(ClipboardData(text: referralCode));
-                          _showSnack(tr('code_copied_success'));
-                          HapticFeedback.mediumImpact();
-                        }
-                      },
-                    ),
-                  ],
-                );
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      GestureDetector(
+                                        onTap: () async {
+                                          String shareMsg =
+                                              "${tr('share_msg_header')}\n\n"
+                                              "${tr('ref_code')}: $referralCode\n\n"
+                                              "${tr('share_msg_download')}:\n"
+                                              "https://play.google.com/store/apps/details?id=your.package.name";
+
+                                          await SharePlus.instance.share(
+                                            ShareParams(text: shareMsg),
+                                          );
+                                          HapticFeedback.lightImpact();
+                                        },
+                                        child: Icon(
+                                          Icons.share_rounded,
+                                          size: 15,
+                                          color: count > 0
+                                              ? Colors.white
+                                              : Colors.white38,
+                                        ),
+                                      ),
+                                      Container(
+                                        height: 12,
+                                        width: 1,
+                                        margin: const EdgeInsets.symmetric(
+                                            horizontal: 8),
+                                        color:
+                                            Colors.white.withValues(alpha: 0.1),
+                                      ),
+                                      Icon(
+                                        Icons.people_alt_rounded,
+                                        size: 14,
+                                        color: count > 0
+                                            ? Colors.purpleAccent
+                                            : Colors.white38,
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        "$count",
+                                        style: TextStyle(
+                                          color: count > 0
+                                              ? Colors.white
+                                              : Colors.white38,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          onTap: () {
+                            if (referralCode != "---") {
+                              Clipboard.setData(
+                                  ClipboardData(text: referralCode));
+                              _showSnack(tr('code_copied_success'));
+                              HapticFeedback.mediumImpact();
+                            }
+                          },
+                        ),
+                      ],
+                    );
+                  },
+                ); // نهاية الـ StreamBuilder الخاص بالـ config
               },
             ),
             StreamBuilder<QuerySnapshot>(

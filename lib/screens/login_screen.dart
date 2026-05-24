@@ -6,7 +6,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:syria_earn_pro/services/ad_manager.dart';
-import 'package:check_vpn_connection/check_vpn_connection.dart';
 import 'package:syria_earn_pro/utils/security_utils.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -38,26 +37,13 @@ class _LoginScreenState extends State<LoginScreen> {
     super.initState();
     _requestNotificationPermissions();
     _checkUpdate();
-    AdManager.initialize();
 
-    _loginBanner = BannerAd(
-      adUnitId: AdManager.adMobBannerId,
-      size: AdSize.banner,
-      request: const AdRequest(),
-      listener: BannerAdListener(
-        onAdLoaded: (ad) => setState(() {}),
-        onAdFailedToLoad: (ad, error) {
-          ad.dispose();
-          debugPrint('Login Banner Error: ${error.message}');
-        },
-      ),
-    )..load();
   }
 
   @override
   void dispose() {
-    _loginBanner?.dispose();
     _referralController.dispose();
+    _loginBanner?.dispose();
     super.dispose();
   }
 
@@ -224,30 +210,8 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+// --- دوال التسجيل والأمان ---
   Future<void> _signInWithGoogle() async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
-    try {
-      final configDoc = await FirebaseFirestore.instance
-          .collection('app_settings')
-          .doc('config')
-          .get();
-
-      bool isVpnProtectionEnabled =
-          configDoc.data()?['is_vpn_protection_enabled'] ?? true;
-
-      if (isVpnProtectionEnabled) {
-        final bool isVpnActive = await CheckVpnConnection.isVpnActive();
-        if (!mounted) return;
-        if (isVpnActive) {
-          _showSnack(tr('close_vpn'));
-          return;
-        }
-      }
-    } catch (e) {
-      debugPrint("خطأ في جلب إعدادات VPN: $e");
-    }
-
     if (!_isAccepted) {
       _showSnack(tr('accept_terms_error'));
       return;
@@ -256,8 +220,6 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      String secureId = await SecurityUtils.getDeviceId();
-
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         setState(() => _isLoading = false);
@@ -276,87 +238,30 @@ class _LoginScreenState extends State<LoginScreen> {
       final User? user = userCredential.user;
 
       if (user != null) {
+        if (!mounted) return;
+
+        // 🛡️ الفحص الأمني
+        bool isEnvironmentSafe =
+            await SecurityUtils.runComprehensiveSecurityCheck(
+                context: context, user: user, adminUid: _adminUid);
+
+        if (!isEnvironmentSafe || !mounted) {
+          setState(() => _isLoading = false);
+          return;
+        }
+
+        // ✅ معالجة بيانات المستخدم في Firestore
+        String secureId = await SecurityUtils.getDeviceId();
         final userDocRef =
             FirebaseFirestore.instance.collection('users').doc(user.uid);
         final docSnapshot = await userDocRef.get();
 
-        if (docSnapshot.exists &&
-            docSnapshot.data()!.containsKey('login_lock_until')) {
-          var lockData = docSnapshot.data()?['login_lock_until'];
-          if (lockData != null) {
-            Timestamp lockTimestamp = lockData as Timestamp;
-            DateTime lockDate = lockTimestamp.toDate();
-            if (DateTime.now().isBefore(lockDate)) {
-              int remaining = lockDate.difference(DateTime.now()).inMinutes;
-              _showSnack(tr('restricted_access_msg',
-                  namedArgs: {'minutes': remaining.clamp(1, 60).toString()}));
-              await FirebaseAuth.instance.signOut();
-              await _googleSignIn.signOut();
-              setState(() => _isLoading = false);
-              return;
-            }
-          }
-        }
-
-        if (docSnapshot.exists && (docSnapshot.data()?['isBanned'] ?? false)) {
-          _showSnack(tr('account_banned_msg'));
-          await _googleSignIn.signOut();
-          await FirebaseAuth.instance.signOut();
-          if (mounted) setState(() => _isLoading = false);
-          return;
-        }
-
-        if (user.uid != _adminUid) {
-          if (userCredential.additionalUserInfo!.isNewUser &&
-              !docSnapshot.exists) {
-            final deviceQuery = await FirebaseFirestore.instance
-                .collection('users')
-                .where('device_id', isEqualTo: secureId)
-                .limit(1)
-                .get();
-
-            if (deviceQuery.docs.isNotEmpty) {
-              String originalOwnerUid = deviceQuery.docs.first.id;
-
-              if (originalOwnerUid != user.uid) {
-                await userDocRef.set({
-                  'name': user.displayName,
-                  'email': user.email,
-                  'isBanned': true,
-                  'ban_reason':
-                      'Multi-account creation attempt detected on device: $secureId',
-                  'device_id': secureId,
-                  'createdAt': FieldValue.serverTimestamp(),
-                  'last_login': FieldValue.serverTimestamp(),
-                }, SetOptions(merge: true));
-
-                await sendNotificationToAdmin("🚨 كشف محاولة غش (تعدد حسابات)",
-                    "المستخدم ${user.displayName} حاول إنشاء حساب جديد على جهاز مسجل مسبقاً!");
-
-                _showSnack(tr('device_already_registered'));
-                await _googleSignIn.signOut();
-                await FirebaseAuth.instance.signOut();
-                if (mounted) setState(() => _isLoading = false);
-                return;
-              }
-            }
-          } else if (docSnapshot.exists) {
-            String? savedDeviceId = docSnapshot.data()?['device_id'];
-            if (savedDeviceId != null &&
-                savedDeviceId != "" &&
-                savedDeviceId != secureId) {
-              if (mounted) setState(() => _isLoading = false);
-              _showDeviceLockedDialog();
-              return;
-            }
-          }
-        }
-
-        String myCode = user.uid.substring(0, 6).toUpperCase();
+        String myCode = user.uid.length >= 6
+            ? user.uid.substring(0, 6).toUpperCase()
+            : user.uid.toUpperCase();
         String enteredCode = _referralController.text.trim().toUpperCase();
-        bool userNotFound = !docSnapshot.exists;
 
-        if (userNotFound) {
+        if (!docSnapshot.exists) {
           String referredByCode = "";
           if (enteredCode.isNotEmpty && enteredCode != myCode) {
             final friendQuery = await FirebaseFirestore.instance
@@ -364,10 +269,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 .where('my_referral_code', isEqualTo: enteredCode)
                 .limit(1)
                 .get();
-
-            if (friendQuery.docs.isNotEmpty) {
-              referredByCode = enteredCode;
-            }
+            if (friendQuery.docs.isNotEmpty) referredByCode = enteredCode;
           }
 
           await userDocRef.set({
@@ -381,33 +283,20 @@ class _LoginScreenState extends State<LoginScreen> {
             'createdAt': FieldValue.serverTimestamp(),
             'last_login': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
-          debugPrint("✅ تم إنشاء حساب جديد بنجاح وتثبيت حماية الأجهزة الفريدة");
         } else {
           await userDocRef.update({
             'last_login': FieldValue.serverTimestamp(),
           });
-          debugPrint("✅ تم تحديث دخول مستخدم سابق مع فحص التطابق الحركي");
         }
 
         if (mounted) {
           setState(() => _isLoading = false);
-          AdManager.loadAppOpenAd();
-          AdManager.showAppOpenAdOnce();
-
-          await Future.delayed(const Duration(milliseconds: 300));
-
-          if (mounted) {
-            Navigator.pushReplacementNamed(context, '/home');
-          }
+          Navigator.pushReplacementNamed(context, '/home');
         }
       }
     } catch (e) {
       debugPrint("Login Error: $e");
-      if (mounted) {
-        scaffoldMessenger.showSnackBar(SnackBar(
-            content: Text(tr('login_error')),
-            backgroundColor: Colors.redAccent));
-      }
+      if (mounted) _showSnack(tr('login_error'));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -540,122 +429,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: AdManager.smartBanner(_loginBanner)),
         ],
       ),
-    );
-  }
-
-  void _showDeviceLockedDialog() {
-    bool isRequestSending = false;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF1A1A2E),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20)),
-              title: const Icon(Icons.phonelink_lock,
-                  color: Colors.redAccent, size: 50),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    tr('device_mismatch_title'),
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 15),
-                  Text(
-                    tr('device_mismatch_body'),
-                    style: const TextStyle(color: Colors.white70, fontSize: 14),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-              actions: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 5.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10)),
-                          ),
-                          icon: isRequestSending
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                      color: Colors.white, strokeWidth: 2))
-                              : const Icon(Icons.send),
-                          label: Text(tr('send_reset_request')),
-                          onPressed: isRequestSending
-                              ? null
-                              : () async {
-                                  setDialogState(() => isRequestSending = true);
-
-                                  try {
-                                    final user =
-                                        FirebaseAuth.instance.currentUser;
-                                    String secureId =
-                                        await SecurityUtils.getDeviceId();
-
-                                    await FirebaseFirestore.instance
-                                        .collection('reset_requests')
-                                        .add({
-                                      'email': user?.email ?? "unknown",
-                                      'userId': user?.uid,
-                                      'device_id': secureId,
-                                      'status': 'pending',
-                                      'timestamp': FieldValue.serverTimestamp(),
-                                    });
-
-                                    await FirebaseAuth.instance.signOut();
-                                    await _googleSignIn.signOut();
-
-                                    if (!context.mounted) return;
-                                    Navigator.pop(ctx);
-                                    _showSnack(tr('request_sent_success'));
-                                  } catch (e) {
-                                    if (mounted) {
-                                      setDialogState(
-                                          () => isRequestSending = false);
-                                      _showSnack(tr('withdraw_error'));
-                                    }
-                                  }
-                                },
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      TextButton(
-                        onPressed: () async {
-                          await FirebaseAuth.instance.signOut();
-                          await _googleSignIn.signOut();
-                          if (!context.mounted) return;
-                          Navigator.pop(ctx);
-                        },
-                        child: Text(tr('close'),
-                            style: const TextStyle(color: Colors.white54)),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
     );
   }
 
