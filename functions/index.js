@@ -1,10 +1,50 @@
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onRequest } = require("firebase-functions/v2/https");
+const { onRequest, onCall } = require("firebase-functions/v2/https"); // ✅ تم إضافة onCall هنا
 const admin = require("firebase-admin");
 
 admin.initializeApp();
 const db = admin.firestore();
+
+// ======================================================================
+// 0. 🎡 دالة عجلة الحظ (مؤمنة في السيرفر)
+// ======================================================================
+exports.spinLuckyWheel = onCall(async (request) => {
+    // 1. التحقق من تسجيل الدخول
+    if (!request.auth) {
+        throw new Error("يجب تسجيل الدخول أولاً");
+    }
+
+    const userId = request.auth.uid;
+    const userRef = db.collection('users').doc(userId);
+
+    // 2. منطق الاحتمالات (60% قليل، 30% متوسط، 10% كبير)
+    const random = Math.random();
+    let points = 0;
+    
+    if (random < 0.60) {
+        points = Math.floor(Math.random() * 3) + 1; // 1-3 نقاط
+    } else if (random < 0.90) {
+        points = Math.floor(Math.random() * 4) + 4; // 4-7 نقاط
+    } else {
+        points = Math.floor(Math.random() * 3) + 8; // 8-10 نقاط
+    }
+
+    // 3. تحديث النقاط في Firestore عبر Transaction لضمان الأمان
+    await db.runTransaction(async (t) => {
+        t.update(userRef, {
+            points: admin.firestore.FieldValue.increment(points),
+            points_history: admin.firestore.FieldValue.arrayUnion({
+                taskId: `lucky_wheel_${Date.now()}`,
+                amount: points,
+                type: 'lucky_wheel_reward',
+                timestamp: new Date()
+            })
+        });
+    });
+
+    return { points: points };
+});
 
 // ======================================================================
 // 1. 💰 دالة CPALead Postback 
@@ -78,27 +118,24 @@ exports.processDailyReward = onDocumentCreated("reward_requests/{requestId}", as
             if (!userDoc.exists) return;
 
             const userData = userDoc.data();
-            // استخدام وقت السيرفر الفعلي لا وقت هاتف المستخدم
             const now = new Date(); 
             const lastClaim = userData.last_daily_claim?.toDate() || new Date(0);
 
-            // 🛡️ فحص الأمان (يجب أن يمر 23 ساعة على الأقل بين المطالبات)
             if (now.getTime() - lastClaim.getTime() < 23 * 60 * 60 * 1000) {
                 t.update(snap.ref, { status: 'error', reason: 'too_early' });
-                return; // إحباط المحاولة
+                return;
             }
 
             const streak = parseInt(userData.streak_count || 0);
             const reward = 10 + (streak * 5);
             const nextStreak = (streak >= 6) ? 0 : streak + 1;
             
-            // تاريخ اليوم بصيغة نصية لكي تقرأه واجهة التطبيق وتغلق الزر
             const todayStr = `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
 
             t.update(userRef, {
                 points: admin.firestore.FieldValue.increment(reward),
                 last_daily_claim: admin.firestore.FieldValue.serverTimestamp(),
-                last_claim_date_str: todayStr, // ✅ مهم جداً لواجهة التطبيق
+                last_claim_date_str: todayStr, 
                 streak_count: nextStreak,
                 points_history: admin.firestore.FieldValue.arrayUnion({
                     taskId: `daily_${todayStr}`,
@@ -213,7 +250,7 @@ exports.onUserReferralReward = onDocumentCreated("users/{userId}", async (event)
 });
 
 // ======================================================================
-// 5. 🕒 العمليات التلقائية والمزامنة الاستاتيكية (بما فيها الأسبوعية)
+// 5. 🕒 العمليات التلقائية
 // ======================================================================
 exports.syncGlobalStats = onDocumentUpdated("users/{userId}", async (event) => {
     const newData = event.data.after.data();
@@ -224,8 +261,6 @@ exports.syncGlobalStats = onDocumentUpdated("users/{userId}", async (event) => {
         
         if (diff > 0) {
             const batch = db.batch();
-
-            // ✅ تحديث نقاط التطبيق الكلية، اليومية، والأسبوعية للإحصائيات الحية
             const configRef = db.collection('app_settings').doc('config');
             batch.set(configRef, {
                 total_points_distributed: admin.firestore.FieldValue.increment(diff),
@@ -233,7 +268,6 @@ exports.syncGlobalStats = onDocumentUpdated("users/{userId}", async (event) => {
                 weekly_points: admin.firestore.FieldValue.increment(diff)
             }, { merge: true });
 
-            // ✅ تحديث النقاط الأسبوعية للمستخدم للوحة الشرف
             const userRef = db.collection('users').doc(event.params.userId);
             batch.update(userRef, {
                 weekly_points: admin.firestore.FieldValue.increment(diff)
@@ -244,19 +278,15 @@ exports.syncGlobalStats = onDocumentUpdated("users/{userId}", async (event) => {
     }
 });
 
-// ✅ تصفير الإحصائيات اليومية
 exports.resetDailyStats = onSchedule("0 0 * * *", async (event) => {
     try {
         await db.collection('app_settings').doc('config').update({ daily_points: 0 });
     } catch (err) { console.error(err); }
 });
 
-// ✅ تصفير الإحصائيات والنقاط الأسبوعية (تعمل كل يوم أحد الساعة 00:00)
 exports.resetWeeklyLeaderboard = onSchedule("0 0 * * 0", async (event) => {
     try {
-        // تصفير إحصائية التطبيق الأسبوعية أولاً
         await db.collection('app_settings').doc('config').update({ weekly_points: 0 });
-
         const usersRef = db.collection('users');
         const snapshot = await usersRef.where('weekly_points', '>', 0).get();
 
@@ -268,20 +298,13 @@ exports.resetWeeklyLeaderboard = onSchedule("0 0 * * 0", async (event) => {
         for (const doc of snapshot.docs) {
             batch.update(doc.ref, { weekly_points: 0 });
             count++;
-
             if (count === 499) {
                 await batch.commit();
                 batch = db.batch();
                 count = 0;
             }
         }
-
-        if (count > 0) {
-            await batch.commit();
-        }
-        
-        console.log("✅ تم تصفير اللوحة الأسبوعية بنجاح لجميع المستخدمين.");
-    } catch (error) {
-        console.error("❌ خطأ أثناء تصفير اللوحة الأسبوعية:", error);
-    }
+        if (count > 0) await batch.commit();
+        console.log("✅ تم تصفير اللوحة الأسبوعية.");
+    } catch (error) { console.error("❌ خطأ:", error); }
 });

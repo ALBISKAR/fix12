@@ -8,6 +8,8 @@ import 'package:provider/provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:flutter/foundation.dart';
+import 'package:startapp_sdk/startapp.dart';
+import 'firebase_options.dart';
 // ✅ استيراد حزمة السيرفر الجديد لإعلانات Start.io
 
 // Imports الشاشات والخدمات
@@ -33,7 +35,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 1. تهيئة الفايربيس واللغات أولاً لضمان تحميل الداتا
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+  options: DefaultFirebaseOptions.currentPlatform,
+);
 
 // 2. 🛡️ تفعيل Firebase App Check (الدرع النووي)
   await FirebaseAppCheck.instance.activate(
@@ -41,6 +45,7 @@ void main() async {
         ? AndroidPlayIntegrityProvider() // كائن الإنتاج (يحظر المحاكيات)
         : AndroidDebugProvider(), // كائن التطوير (يسمح لك بالاختبار)
   );
+  StartAppSdk();
 
   await EasyLocalization.ensureInitialized();
 

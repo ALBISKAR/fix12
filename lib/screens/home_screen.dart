@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:syria_earn_pro/screens/history_screen.dart';
+import 'package:syria_earn_pro/screens/lucky_wheel_dialog.dart';
 import 'package:syria_earn_pro/screens/offers_tab_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:syria_earn_pro/services/ad_manager.dart';
@@ -30,7 +31,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  int _secondsRemaining = 0;
   bool _isWaiting = false;
   int totalPoints = 0;
   bool _isAdProcessing = false;
@@ -534,57 +534,48 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-// ✅ التعديل الحاسم: جعل الـ cooldown يستقبل القيمة السحابية القادمة من الـ StreamBuilder مباشرة دون قيم افتراضية ثابتة داخل الكود
   void _handleAdSelection({required String server, required int cooldown}) {
     if (_isAdProcessing) return;
 
-    if (server == "unity") {
-      if (_unitySecondsLeft > 0) {
-        _showErrorSnackBar("${tr('wait')} ${_formatTime(_unitySecondsLeft)}");
-        return;
-      }
-    } else {
-      if (_admobSecondsLeft > 0) {
-        _showErrorSnackBar("${tr('wait')} ${_formatTime(_admobSecondsLeft)}");
-        return;
+    // ✅ التعديل: فحص الوقت يتم فقط إذا لم تكن أنت الأدمن
+    if (!isAdmin) {
+      if (server == "unity") {
+        if (_unitySecondsLeft > 0) {
+          _showErrorSnackBar("${tr('wait')} ${_formatTime(_unitySecondsLeft)}");
+          return;
+        }
+      } else {
+        if (_admobSecondsLeft > 0) {
+          _showErrorSnackBar("${tr('wait')} ${_formatTime(_admobSecondsLeft)}");
+          return;
+        }
       }
     }
 
+    // إذا كنت أدمن، أو كان الوقت قد انتهى، سيستمر الكود إلى هنا:
+
     if (server == "unity") {
-      // 🚀 تشغيل وعرض إعلان سيرفر 1 (Start.io) الجديد فوراً عند النقر
       AdManager.showServer1Ad(context);
     } else {
       setState(() {
         _isAdProcessing = true;
         _isWaiting = true;
       });
-      _startWaitingTimer();
 
       AdManager.showAdMobVideo(
         onReward: () async {
-          try {
-            await FirebaseFirestore.instance.collection('completed_tasks').add({
-              'userId': FirebaseAuth.instance.currentUser!.uid,
-              'taskType': 'admob_ad',
-              'timestamp': FieldValue.serverTimestamp(),
-              'status': 'pending',
-            });
-
-            if (mounted) {
-              // ✅ تمرير المتغير السحابي الديناميكي هنا أيضاً لـ AdMob
-              _startCooldownWithFirebase(
-                  "admob", FirebaseAuth.instance.currentUser!.uid, cooldown);
-              _showSuccessSnackBar(tr('admob_request_success'));
-            }
-          } catch (e) {
-            _showErrorSnackBar(tr('admob_connection_error'));
-          } finally {
-            if (mounted) {
-              setState(() {
-                _isWaiting = false;
-                _isAdProcessing = false;
-              });
-            }
+          // فتح دولاب الحظ بعد مشاهدة الإعلان
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => LuckyWheelDialog(
+                onRewardEarned: (points) {
+                  // تحديث المهمة بعد الفوز من الدولاب
+                  _completeAdTask(cooldown);
+                },
+              ),
+            );
           }
         },
         onFailed: () {
@@ -597,6 +588,35 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           _showErrorSnackBar(tr('admob_ad_not_ready'));
         },
       );
+    }
+  }
+
+// ✅ دالة منفصلة لتأكيد المهمة (تأخذ مكان الكود الذي كان في onReward)
+  Future<void> _completeAdTask(int cooldown) async {
+    try {
+      // 1. تسجيل المهمة في السيرفر
+      await FirebaseFirestore.instance.collection('completed_tasks').add({
+        'userId': FirebaseAuth.instance.currentUser!.uid,
+        'taskType': 'admob_ad',
+        'timestamp': FieldValue.serverTimestamp(),
+        'status': 'pending',
+      });
+
+      // 2. تفعيل الـ Cooldown
+      if (mounted) {
+        _startCooldownWithFirebase(
+            "admob", FirebaseAuth.instance.currentUser!.uid, cooldown);
+        _showSuccessSnackBar(tr('admob_request_success'));
+      }
+    } catch (e) {
+      _showErrorSnackBar(tr('admob_connection_error'));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isWaiting = false;
+          _isAdProcessing = false;
+        });
+      }
     }
   }
 
@@ -632,32 +652,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 
-
-  void _startWaitingTimer() {
-    _secondsRemaining = 15;
-    setState(() {
-      _isWaiting = true;
-    });
-
-    Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-
-      if (_secondsRemaining > 0) {
-        setState(() {
-          _secondsRemaining--;
-        });
-      } else {
-        timer.cancel();
-        setState(() {
-          _isWaiting = false;
-        });
-      }
-    });
-  }
-
   void _showErrorSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -676,20 +670,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 // ✅ 1. فحص هل المستخدم يحق له المطالبة (يعتمد على حقل السلسلة النصية للتاريخ المحفوظ مسبقاً)
   void _checkDailyRewardStatus(String uid) async {
     try {
-      DateTime now = DateTime.now(); // نستخدم وقت الهاتف للعرض فقط (آمن هنا لأن المنع الحقيقي في السيرفر)
+      DateTime now = DateTime
+          .now(); // نستخدم وقت الهاتف للعرض فقط (آمن هنا لأن المنع الحقيقي في السيرفر)
       String todayStr = "${now.year}-${now.month}-${now.day}";
 
-      final userDocRef = FirebaseFirestore.instance.collection('users').doc(uid);
+      final userDocRef =
+          FirebaseFirestore.instance.collection('users').doc(uid);
       final doc = await userDocRef.get();
 
       if (doc.exists && doc.data() != null) {
         var data = doc.data()!;
-        if (data.containsKey('last_claim_date_str') && data['last_claim_date_str'] != null) {
+        if (data.containsKey('last_claim_date_str') &&
+            data['last_claim_date_str'] != null) {
           String lastClaimStr = data['last_claim_date_str'];
           if (mounted) {
             setState(() {
               // يحق له المطالبة إذا كان تاريخ اليوم مختلفاً عن تاريخ آخر مطالبة
-              _canClaimDaily = lastClaimStr != todayStr; 
+              _canClaimDaily = lastClaimStr != todayStr;
             });
           }
           return;
@@ -725,7 +722,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       // 🚀 إرسال طلب للسيرفر: السيرفر سيتكفل بكل شيء (الوقت الحقيقي، الحساب، وتوزيع النقاط)
       await FirebaseFirestore.instance.collection('reward_requests').add({
         'userId': user.uid,
-        'timestamp': FieldValue.serverTimestamp(), // السيرفر يضع وقته الحقيقي هنا
+        'timestamp':
+            FieldValue.serverTimestamp(), // السيرفر يضع وقته الحقيقي هنا
         'status': 'pending'
       });
 
@@ -733,15 +731,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (mounted) {
         _showSuccessSnackBar(tr('reward_processing_msg'));
         setState(() {
-           _canClaimDaily = false; // نقفل الزر فوراً لمنع السبام
+          _canClaimDaily = false; // نقفل الزر فوراً لمنع السبام
         });
-        
+
         // إغلاق الـ Drawer إذا كان مفتوحاً
         if (Scaffold.of(context).isDrawerOpen) {
           Navigator.pop(context);
         }
       }
-
     } catch (e) {
       _showErrorSnackBar(tr('error_occurred'));
     }
@@ -1463,7 +1460,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-void _showFakeVerificationDialog() {
+  void _showFakeVerificationDialog() {
     int countdown = 60;
     Timer? timer;
 
@@ -1472,8 +1469,9 @@ void _showFakeVerificationDialog() {
       barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
-          builder: (dialogContext, setDialogState) { // ✅ تم تغيير الاسم هنا ليكون دقيقاً لبيئة الدايلوج
-            
+          builder: (dialogContext, setDialogState) {
+            // ✅ تم تغيير الاسم هنا ليكون دقيقاً لبيئة الدايلوج
+
             // تهيئة المؤقت بشكل آمن يضمن الإغلاق التلقائي دون تضارب الذاكرة
             timer ??= Timer.periodic(const Duration(seconds: 1), (t) {
               // 🛡️ فحص حرج: التأكد أن نافذة الدايلوج ما زالت مفتوحة ونشطة في الشاشة الآن
@@ -1504,7 +1502,8 @@ void _showFakeVerificationDialog() {
                 ),
                 title: Row(
                   children: [
-                    const Icon(Icons.verified_user_rounded, color: Colors.amber),
+                    const Icon(Icons.verified_user_rounded,
+                        color: Colors.amber),
                     const SizedBox(width: 10),
                     Text(
                       tr('verifying'),
@@ -1520,15 +1519,18 @@ void _showFakeVerificationDialog() {
                     Text(
                       tr('verifying_desc'),
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 14, height: 1.5),
                     ),
                     const SizedBox(height: 15),
                     InkWell(
                       onTap: () async {
-                        const String url = "https://play.google.com/store/apps/details?id=com.mohamad.syria_earn";
+                        const String url =
+                            "https://play.google.com/store/apps/details?id=com.mohamad.syria_earn";
                         final Uri uri = Uri.parse(url);
                         if (await canLaunchUrl(uri)) {
-                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          await launchUrl(uri,
+                              mode: LaunchMode.externalApplication);
                         }
                       },
                       child: Padding(
@@ -1558,7 +1560,10 @@ void _showFakeVerificationDialog() {
                     const SizedBox(height: 15),
                     Text(
                       tr('verifying_points_hint'),
-                      style: const TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -1599,7 +1604,6 @@ void _showFakeVerificationDialog() {
       // 3. نتحقق من الشاشة الرئيسية الخلفية قبل إظهار رسالة النجاح للمستخدم
       if (!mounted) return;
       _showSuccessSnackBar("${tr('success_rate')} 25 ${tr('points')}");
-
     } catch (e) {
       debugPrint("Error finalizing points: $e");
       // في حالة حدوث خطأ شبكة غير متوقع، نكتفي بالتنبيه دون انهيار الواجهة

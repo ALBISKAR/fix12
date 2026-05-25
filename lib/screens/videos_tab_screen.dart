@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'lucky_wheel_dialog.dart';
+import '../services/ad_manager.dart'; // تأكد من الاستيراد
 
-class VideosTabScreen extends StatelessWidget {
+class VideosTabScreen extends StatefulWidget {
+  // 1. تغيير إلى StatefulWidget
   final int unityRemaining;
   final int admobRemaining;
   final int unitySecondsLeft;
   final int admobSecondsLeft;
-  final int unityPoints;
-  final int admobPoints;
   final bool isWaiting;
   final VoidCallback onUnityTap;
   final VoidCallback onAdMobTap;
+  final Function(int) onPointsEarned;
 
   const VideosTabScreen({
     super.key,
@@ -19,17 +21,62 @@ class VideosTabScreen extends StatelessWidget {
     required this.admobRemaining,
     required this.unitySecondsLeft,
     required this.admobSecondsLeft,
-    required this.unityPoints,
-    required this.admobPoints,
     required this.isWaiting,
     required this.onUnityTap,
     required this.onAdMobTap,
+    required this.onPointsEarned,
   });
+
+  @override
+  State<VideosTabScreen> createState() => _VideosTabScreenState();
+}
+
+class _VideosTabScreenState extends State<VideosTabScreen> {
+  // 2. إنشاء الـ State
 
   String _formatTime(int seconds) {
     int minutes = seconds ~/ 60;
     int remainingSeconds = seconds % 60;
     return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+  }
+
+  void _showLuckyWheelDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => LuckyWheelDialog(
+        onRewardEarned: (points) {
+          widget.onPointsEarned(points); // استخدام widget. للوصول للمتغيرات
+        },
+      ),
+    );
+  }
+
+  void _openLuckyWheel(BuildContext context, VoidCallback baseTapAction) {
+    // 1. حالة الأدمن: فتح مباشر
+    if (AdManager.isAdmin) {
+      _showLuckyWheelDialog(context);
+      return;
+    }
+
+    // 2. حالة المستخدم العادي: ربط بانتهاء الإعلان
+    AdManager.onAdClosedCallback = () {
+      // ✅ فحص الأمان الأول: هل لا تزال الشاشة موجودة؟
+      if (!context.mounted) return;
+
+      Future.microtask(() {
+        // ✅ فحص الأمان الثاني: هل لا تزال الشاشة موجودة بعد المهام المؤجلة؟
+        if (!context.mounted) return;
+
+        _showLuckyWheelDialog(context);
+      });
+
+      // تصفير الكولباك لضمان عدم التكرار
+      AdManager.onAdClosedCallback = null;
+    };
+
+    // 3. تشغيل الإعلان
+    baseTapAction();
   }
 
   @override
@@ -39,76 +86,68 @@ class VideosTabScreen extends StatelessWidget {
       children: [
         _buildVideoServerCard(
           title: tr('unity_ad'),
-          sub: unitySecondsLeft > 0 ? "${tr('wait')} ${_formatTime(unitySecondsLeft)}" : tr('video_ad_sub'),
-          points: unityPoints,
+          sub: widget.unitySecondsLeft > 0 // الوصول للمتغيرات عبر widget.
+              ? tr('wait_time', args: [_formatTime(widget.unitySecondsLeft)])
+              : tr('lucky_wheel_prompt'),
           icon: FontAwesomeIcons.unity,
-          remaining: unityRemaining,
+          remaining: widget.unityRemaining,
           isPremium: true,
-          onTap: onUnityTap,
+          onTap: () => _openLuckyWheel(context, widget.onUnityTap),
         ),
         const SizedBox(height: 20),
         _buildVideoServerCard(
           title: tr('admob_ad'),
-          sub: admobSecondsLeft > 0 ? "${tr('wait')} ${_formatTime(admobSecondsLeft)}" : tr('video_ad_sub'),
-          points: admobPoints,
+          sub: widget.admobSecondsLeft > 0
+              ? tr('wait_time', args: [_formatTime(widget.admobSecondsLeft)])
+              : tr('win_chance_sub'),
           icon: FontAwesomeIcons.google,
-          remaining: admobRemaining,
+          remaining: widget.admobRemaining,
           isPremium: false,
-          onTap: onAdMobTap,
+          onTap: () => _openLuckyWheel(context, widget.onAdMobTap),
         ),
-        const SizedBox(height: 80),
       ],
     );
   }
 
+  // الدالة _buildVideoServerCard تبقى كما هي (داخل الـ State)
   Widget _buildVideoServerCard({
     required String title,
     required String sub,
-    required int points,
     required dynamic icon,
     required VoidCallback onTap,
     required int remaining,
     bool isPremium = false,
   }) {
+    // نفس الكود الخاص بك هنا
     return Card(
       color: const Color(0xFF1E1E2E),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: isPremium ? Colors.amber.withValues(alpha: 0.3) : Colors.cyanAccent.withValues(alpha: 0.3)),
+        side: BorderSide(
+            color: isPremium
+                ? Colors.amber.withValues(alpha: 0.5)
+                : Colors.cyan.withValues(alpha: 0.5)),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-        leading: ShaderMask(
-          shaderCallback: (Rect bounds) => LinearGradient(
-            colors: isPremium ? [Colors.amber, Colors.orangeAccent] : [Colors.blueAccent, Colors.cyanAccent],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ).createShader(bounds),
-          child: FaIcon(icon as FaIconData?, color: Colors.white, size: 42),
-        ),
-        title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 5),
-            Text(sub, style: const TextStyle(color: Colors.white70, fontSize: 16)),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: remaining > 0 ? Colors.green.withValues(alpha: 0.2) : Colors.red.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: Text(
-                "${tr('remaining')}: $remaining",
-                style: TextStyle(color: remaining > 0 ? Colors.greenAccent : Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w900),
-              ),
-            ),
-          ],
-        ),
-        trailing: Text("+$points", style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.w900, fontSize: 18)),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+        leading: FaIcon(icon,
+            color: isPremium ? Colors.amber : Colors.cyanAccent, size: 40),
+        title: Text(title,
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold)),
+        subtitle: Text(sub, style: const TextStyle(color: Colors.white70)),
+        trailing: Icon(Icons.refresh,
+            color: remaining > 0 ? Colors.amber : Colors.grey),
         onTap: remaining > 0 ? onTap : null,
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    // ✅ مسح الكولباك عند إغلاق الشاشة لمنع استدعاءات خاطئة
+    AdManager.onAdClosedCallback = null;
+    super.dispose();
   }
 }

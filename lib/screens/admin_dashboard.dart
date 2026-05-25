@@ -412,17 +412,67 @@ class _AdminDashboardState extends State<AdminDashboard> {
         context: context,
         builder: (ctx) => AlertDialog(
               backgroundColor: const Color(0xFF1A1A2E),
-              title: Text("تعديل $key"),
+              title: Text("تعديل $key",
+                  style: const TextStyle(color: Colors.amber)),
               content: TextField(
                   controller: editController,
                   style: const TextStyle(color: Colors.white)),
               actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text("إلغاء")),
                 ElevatedButton(
-                    onPressed: () =>
-                        _updateConfigAndPop(key, editController.text, ctx),
-                    child: const Text("حفظ")),
+                    style:
+                        ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+                    onPressed: () => _updateConfigAndPop(
+                        key,
+                        editController.text,
+                        currentValue,
+                        ctx), // نرسل القيمة الأصلية لمعرفة نوعها
+                    child: const Text("حفظ",
+                        style: TextStyle(color: Colors.black))),
               ],
             ));
+  }
+
+  Future<void> _updateConfigAndPop(String key, String newValue,
+      dynamic originalValue, BuildContext dialogCtx) async {
+    dynamic finalValue = newValue;
+
+    // 🔥 الذكاء هنا: الحفاظ على نوع البيانات الأصلي في Firebase 🔥
+    if (originalValue is int) {
+      finalValue =
+          int.tryParse(newValue) ?? originalValue; // تحويل إلى رقم صحيح
+    } else if (originalValue is double) {
+      finalValue =
+          double.tryParse(newValue) ?? originalValue; // تحويل إلى رقم عشري
+    } else if (originalValue is bool) {
+      finalValue =
+          newValue.toLowerCase() == 'true'; // تحويل إلى قيمة منطقية (صح/خطأ)
+    }
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('app_settings')
+          .doc('config')
+          .update({key: finalValue});
+
+      if (!dialogCtx.mounted) return;
+      Navigator.pop(dialogCtx);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("تم تعديل الإعدادات بنجاح ✅"),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating));
+      }
+    } catch (e) {
+      if (!dialogCtx.mounted) return;
+      ScaffoldMessenger.of(dialogCtx).showSnackBar(SnackBar(
+          content: Text("حدث خطأ: $e"),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating));
+    }
   }
 
   void _editNotificationDialog(
@@ -451,17 +501,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ));
   }
 
-  Future<void> _updateConfigAndPop(
-      String key, dynamic value, BuildContext dialogCtx) async {
-    await FirebaseFirestore.instance
-        .collection('app_settings')
-        .doc('config')
-        .update({key: value});
-    if (!dialogCtx.mounted) return;
-    Navigator.pop(dialogCtx);
-  }
-
-void _showUserHistory(String uid, String name) {
+  void _showUserHistory(String uid, String name) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true, // لجعل النافذة قابلة للتمدد
@@ -469,14 +509,19 @@ void _showUserHistory(String uid, String name) {
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => SizedBox(
-        height: MediaQuery.of(context).size.height * 0.7, // ارتفاع النافذة 70% من الشاشة
+        height: MediaQuery.of(context).size.height *
+            0.7, // ارتفاع النافذة 70% من الشاشة
         child: StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+          stream: FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .snapshots(),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator(color: Colors.amber));
+              return const Center(
+                  child: CircularProgressIndicator(color: Colors.amber));
             }
-            
+
             var userData = snapshot.data!.data() as Map<String, dynamic>?;
             var history = userData?['points_history'] as List? ?? [];
             // عكس القائمة لعرض أحدث العمليات في الأعلى
@@ -501,24 +546,32 @@ void _showUserHistory(String uid, String name) {
                           itemCount: sortedHistory.length,
                           itemBuilder: (context, i) {
                             var item = sortedHistory[i] as Map<String, dynamic>;
-                            
+
                             // التعامل مع التاريخ (تحويل Timestamp إلى نص)
                             String formattedDate = "غير معروف";
                             if (item['timestamp'] != null) {
-                              DateTime date = (item['timestamp'] as Timestamp).toDate();
-                              formattedDate = DateFormat('yyyy/MM/dd - hh:mm a').format(date);
+                              DateTime date =
+                                  (item['timestamp'] as Timestamp).toDate();
+                              formattedDate = DateFormat('yyyy/MM/dd - hh:mm a')
+                                  .format(date);
                             }
 
                             int amount = item['amount'] ?? 0;
                             String type = item['type'] ?? "عملية";
 
                             return ListTile(
-                              title: Text(type, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                              subtitle: Text(formattedDate, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                              title: Text(type,
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 14)),
+                              subtitle: Text(formattedDate,
+                                  style: const TextStyle(
+                                      color: Colors.white38, fontSize: 11)),
                               trailing: Text(
                                 amount >= 0 ? "+$amount" : "$amount",
                                 style: TextStyle(
-                                    color: amount >= 0 ? Colors.greenAccent : Colors.redAccent,
+                                    color: amount >= 0
+                                        ? Colors.greenAccent
+                                        : Colors.redAccent,
                                     fontWeight: FontWeight.bold),
                               ),
                             );

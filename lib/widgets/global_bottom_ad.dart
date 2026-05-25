@@ -80,7 +80,7 @@ class _GlobalBottomAdState extends State<GlobalBottomAd> {
 
           // 2️⃣ البانر الثاني: إعلان Start.io (يتم استدعاؤه وإجباره على الظهور أسفل AdMob)
           // قمنا بتمرير قوة الإجبار (forceAdMob: false) ليعود ويعرض بانر Start.io المجهز في الـ AdManager
-          AdManager.smartBanner(null, forceAdMob: false),
+          AdManager.smartBanner(_adMobBanner),
         ],
       ),
     );
