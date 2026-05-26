@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:syria_earn_pro/services/ad_manager.dart';
+import 'package:startapp_sdk/startapp.dart';
 
 class GlobalBottomAd extends StatefulWidget {
   const GlobalBottomAd({super.key});
@@ -13,11 +14,14 @@ class GlobalBottomAd extends StatefulWidget {
 class _GlobalBottomAdState extends State<GlobalBottomAd> {
   BannerAd? _adMobBanner;
   bool _isAdMobLoaded = false;
+  StartAppBannerAd? _startAppBanner;
+  bool _isStartAppLoaded = false;
 
   @override
   void initState() {
     super.initState();
     _loadAdMobBanner();
+    _loadStartAppBanner();
   }
 
   void _loadAdMobBanner() {
@@ -47,6 +51,29 @@ class _GlobalBottomAdState extends State<GlobalBottomAd> {
     )..load();
   }
 
+  void _loadStartAppBanner() {
+    // ✅ التأكد من تفعيل الإعلانات التجريبية للبانر تحديداً قبل طلبه 
+    StartAppSdk().setTestAdsEnabled(false); // تأكد من تعطيل الإعلانات التجريبية للبانر في الإنتاج
+
+    StartAppSdk().loadBannerAd(StartAppBannerType.BANNER).then((ad) {
+      if (mounted) {
+        setState(() {
+          _startAppBanner = ad;
+          _isStartAppLoaded = true;
+        });
+      }
+    }).catchError((error) {
+      debugPrint("❌ StartApp Banner Failed: $error");
+      // ✅ ميزة إعادة المحاولة التلقائية: إذا فشل التحميل أو حدث Timeout، ننتظر 30 ثانية ونحاول مجدداً
+      Future.delayed(const Duration(seconds: 30), () {
+        // نتأكد أن الشاشة لا تزال مفتوحة، وأن البانر لم يتم تحميله بعد
+        if (mounted && !_isStartAppLoaded) {
+          _loadStartAppBanner();
+        }
+      });
+    });
+  }
+
   @override
   void dispose() {
     _adMobBanner?.dispose();
@@ -66,21 +93,23 @@ class _GlobalBottomAdState extends State<GlobalBottomAd> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 1️⃣ البانر الأول: إعلان AdMob (يظهر فقط إذا تم تحميله بنجاح)
+          if (_isStartAppLoaded && _startAppBanner != null)
+            SizedBox(
+              height: 50,
+              width: double.infinity,
+              child: StartAppBanner(_startAppBanner!),
+            ),
+
+          // 🛑 فاصل بسيط لحماية الحساب من مخالفات النقرات غير المقصودة
+          if (_isStartAppLoaded && _isAdMobLoaded)
+            const SizedBox(height: 8), 
+
           if (_isAdMobLoaded && _adMobBanner != null)
             SizedBox(
               height: 50,
               width: double.infinity,
               child: AdWidget(ad: _adMobBanner!),
             ),
-
-          // 🛑 فاصل صغير جداً لحماية الحساب من مخالفات النقرات غير المقصودة وسياسات AdMob
-          if (_isAdMobLoaded)
-            const SizedBox(height: 4), 
-
-          // 2️⃣ البانر الثاني: إعلان Start.io (يتم استدعاؤه وإجباره على الظهور أسفل AdMob)
-          // قمنا بتمرير قوة الإجبار (forceAdMob: false) ليعود ويعرض بانر Start.io المجهز في الـ AdManager
-          AdManager.smartBanner(_adMobBanner),
         ],
       ),
     );

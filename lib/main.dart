@@ -34,6 +34,9 @@ const String adminUidConst = 'OeEwi4nMZrPjRLRiqWf1373btQT2';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 🚀 تهيئة Start.io مبكراً جداً في دورة حياة التطبيق لمنع أي تأخير أو Timeout عند طلب الإعلانات
+  StartAppSdk();
+
   // 1. تهيئة الفايربيس واللغات أولاً لضمان تحميل الداتا
   await Firebase.initializeApp(
   options: DefaultFirebaseOptions.currentPlatform,
@@ -45,7 +48,6 @@ void main() async {
         ? AndroidPlayIntegrityProvider() // كائن الإنتاج (يحظر المحاكيات)
         : AndroidDebugProvider(), // كائن التطوير (يسمح لك بالاختبار)
   );
-  StartAppSdk();
 
   await EasyLocalization.ensureInitialized();
 
@@ -94,6 +96,9 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  bool _isAppInBackground = false;
+  DateTime? _backgroundTime;
+
   @override
   void initState() {
     super.initState();
@@ -108,11 +113,22 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 1. عندما يذهب التطبيق للخلفية، نقوم بتفعيل هذا المتغير
+    if (state == AppLifecycleState.paused) {
+      _isAppInBackground = true;
+      _backgroundTime = DateTime.now();
+    }
+
     final user = FirebaseAuth.instance.currentUser;
     bool isUserAdmin = user != null && user.uid == adminUidConst;
 
-    if (state == AppLifecycleState.resumed && !isUserAdmin) {
-      AdManager.showAppOpenAdOnce();
+    // 2. لن يظهر الإعلان إلا إذا عاد التطبيق للواجهة وكان المتغير فعالاً وبقي في الخلفية لفترة
+    if (state == AppLifecycleState.resumed && _isAppInBackground && !isUserAdmin) {
+      _isAppInBackground = false; // 3. نعيد المتغير لوضعه الطبيعي لمنع التكرار
+      // 4. لا نظهر الإعلان إذا عاد المستخدم بسرعة (أقل من 10 ثواني) لتجنب الإزعاج
+      if (_backgroundTime != null && DateTime.now().difference(_backgroundTime!).inSeconds > 10) {
+        AdManager.showAppOpenAdOnce();
+      }
     }
   }
 

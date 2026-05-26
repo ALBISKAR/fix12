@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 
 class DeviceRequestsScreen extends StatefulWidget {
   const DeviceRequestsScreen({super.key});
@@ -115,14 +113,6 @@ class _DeviceRequestsScreenState extends State<DeviceRequestsScreen> {
           'approvedAt': FieldValue.serverTimestamp(),
         });
 
-        // 4. محاولة إرسال إشعار للمستخدم لإبلاغه بالقبول
-        try {
-          await _sendNotificationToUser(email, "تم قبول طلبك! 🎉",
-              "يمكنك الآن تسجيل الدخول بجهازك الجديد والبدء في الربح.");
-        } catch (notifError) {
-          debugPrint("فشل إرسال الإشعار ولكن تم التفعيل بنجاح: $notifError");
-        }
-
         // 🛡️ حارس أمني لضمان أن الشاشة لا تزال مفتوحة قبل استخدام context
         if (!context.mounted) return;
 
@@ -145,32 +135,5 @@ class _DeviceRequestsScreenState extends State<DeviceRequestsScreen> {
           backgroundColor: Colors.redAccent,
           behavior: SnackBarBehavior.floating));
     }
-  }
-
-  // 🔔 دالة إرسال الإشعار للمستخدم
-  Future<void> _sendNotificationToUser(
-      String email, String title, String body) async {
-    const String serverKey = 'AIzaSyDw2o4boLXWVKQ4WTW7fSfKkXsAJE5DR8I';
-    const String fcmUrl = 'https://fcm.googleapis.com/fcm/send';
-
-    final Map<String, dynamic> notificationData = {
-      'notification': {
-        'title': title,
-        'body': body,
-        'sound': 'default',
-      },
-      'priority': 'high',
-      // يفضل هنا الإرسال لـ Topic مرتبط بإيميل المستخدم أو الـ UID الخاص به
-      'to': '/topics/user_${email.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '')}',
-    };
-
-    await http.post(
-      Uri.parse(fcmUrl),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'key=$serverKey',
-      },
-      body: jsonEncode(notificationData),
-    );
   }
 }

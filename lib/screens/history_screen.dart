@@ -40,8 +40,12 @@ class HistoryScreen extends StatelessWidget {
               
               // تحويل التاريخ من Timestamp
               DateTime? date;
-              if (item['timestamp'] is Timestamp) {
-                date = (item['timestamp'] as Timestamp).toDate();
+              if (item['timestamp'] != null) {
+                if (item['timestamp'] is Timestamp) {
+                  date = (item['timestamp'] as Timestamp).toDate();
+                } else if (item['timestamp'] is String) {
+                  date = DateTime.tryParse(item['timestamp']);
+                }
               }
               String formattedDate = date != null
                   ? DateFormat('yyyy/MM/dd - hh:mm a').format(date)

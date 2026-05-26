@@ -40,6 +40,15 @@ exports.spinLuckyWheel = onCall(async (request) => {
                 type: 'lucky_wheel_reward',
                 timestamp: new Date()
             })
+            });
+
+            const newTaskRef = db.collection('completed_tasks').doc();
+            t.set(newTaskRef, {
+                userId: userId,
+                taskType: 'lucky_wheel_reward',
+                rewardAmount: points,
+                status: 'verified',
+                timestamp: new Date()
         });
     });
 
@@ -95,6 +104,15 @@ exports.cpaleadPostback = onRequest(async (req, res) => {
                 amount: rewardPoints,
                 processedAt: admin.firestore.FieldValue.serverTimestamp()
             });
+
+            const newTaskRef = db.collection('completed_tasks').doc();
+            t.set(newTaskRef, {
+                userId: userId,
+                taskType: 'offerwall_reward',
+                rewardAmount: rewardPoints,
+                status: 'verified',
+                timestamp: new Date()
+            });
         });
 
         return res.status(200).send("OK");
@@ -119,10 +137,10 @@ exports.processDailyReward = onDocumentCreated("reward_requests/{requestId}", as
 
             const userData = userDoc.data();
             const now = new Date(); 
-            const lastClaim = userData.last_daily_claim?.toDate() || new Date(0);
+            const lastClaim = userData.last_daily_claim ? userData.last_daily_claim.toDate() : new Date(0);
 
             if (now.getTime() - lastClaim.getTime() < 23 * 60 * 60 * 1000) {
-                t.update(snap.ref, { status: 'error', reason: 'too_early' });
+                t.update(snap.ref, { status: 'error', reason: 'too_early', processedAt: admin.firestore.FieldValue.serverTimestamp() });
                 return;
             }
 
@@ -145,9 +163,111 @@ exports.processDailyReward = onDocumentCreated("reward_requests/{requestId}", as
                 })
             });
 
-            t.update(snap.ref, { status: 'success', processedAt: admin.firestore.FieldValue.serverTimestamp() });
+            t.update(snap.ref, { status: 'success', rewardAmount: reward, processedAt: admin.firestore.FieldValue.serverTimestamp() });
+            
+            const newTaskRef = db.collection('completed_tasks').doc();
+            t.set(newTaskRef, {
+                userId: userId,
+                taskType: 'daily_reward',
+                rewardAmount: reward,
+                status: 'verified',
+                timestamp: now
+            });
         });
     } catch (error) { console.error("❌ Daily Reward Error:", error); }
+});
+
+// ======================================================================
+// 2b. 🎁 المكافأة اليومية المباشرة عبر HTTP
+// ======================================================================
+exports.claimDailyReward = onRequest(async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (req.method === 'OPTIONS') {
+        return res.status(204).send('');
+    }
+
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'method_not_allowed' });
+    }
+
+    try {
+        const authHeader = req.headers.authorization || '';
+        const match = authHeader.match(/^Bearer (.+)$/);
+        if (!match) {
+            return res.status(401).json({ error: 'unauthorized' });
+        }
+
+        const decodedToken = await admin.auth().verifyIdToken(match[1]);
+        const uid = decodedToken.uid;
+        const userRef = db.collection('users').doc(uid);
+
+        const result = await db.runTransaction(async (t) => {
+            const userDoc = await t.get(userRef);
+            if (!userDoc.exists) {
+                throw new Error('user_not_found');
+            }
+
+            const userData = userDoc.data() || {};
+            const now = new Date();
+            
+            let lastClaim = new Date(0);
+            if (userData.last_daily_claim) {
+                if (typeof userData.last_daily_claim.toDate === 'function') {
+                    lastClaim = userData.last_daily_claim.toDate();
+                } else {
+                    lastClaim = new Date(userData.last_daily_claim); // معالجة احتياطية إذا كان التاريخ محفوظاً كنص
+                }
+            }
+
+            if (now.getTime() - lastClaim.getTime() < 23 * 60 * 60 * 1000) {
+                return { status: 'error', reason: 'too_early' };
+            }
+
+            const streak = parseInt(userData.streak_count || 0);
+            const reward = 10 + (streak * 5);
+            const nextStreak = streak >= 6 ? 0 : streak + 1;
+            const todayStr = `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
+
+            t.update(userRef, {
+                points: admin.firestore.FieldValue.increment(reward),
+                last_daily_claim: admin.firestore.FieldValue.serverTimestamp(),
+                last_claim_date_str: todayStr,
+                streak_count: nextStreak,
+                points_history: admin.firestore.FieldValue.arrayUnion({
+                    taskId: `daily_${todayStr}`,
+                    amount: reward,
+                    type: 'daily_reward',
+                    timestamp: now
+                })
+            });
+
+            const newTaskRef = db.collection('completed_tasks').doc();
+            t.set(newTaskRef, {
+                userId: uid,
+                taskType: 'daily_reward',
+                rewardAmount: reward,
+                status: 'verified',
+                timestamp: now
+            });
+
+            return { status: 'success', reward };
+        });
+
+        if (result.status === 'error') {
+            return res.status(409).json({ error: 'too_early' });
+        }
+
+        return res.status(200).json({ status: 'success', rewardAmount: result.reward });
+    } catch (error) {
+        console.error('❌ claimDailyReward Error:', error);
+        if (error.message === 'user_not_found') {
+            return res.status(404).json({ error: 'user_not_found' });
+        }
+        return res.status(500).json({ error: 'internal_error', details: error.message });
+    }
 });
 
 // ======================================================================
@@ -157,6 +277,12 @@ exports.verifytaskandaddpoints = onDocumentCreated("completed_tasks/{taskId}", a
     const snap = event.data;
     if (!snap) return null;
     const { userId, taskType } = snap.data();
+
+    // 🛑 حماية: هذه الدالة مخصصة للتحقق من الإعلانات فقط، ولا يجب أن تتدخل في عجلة الحظ أو المكافآت الأخرى
+    if (taskType !== 'server1_ad' && taskType !== 'unity_ad' && taskType !== 'admob_ad') {
+        return null;
+    }
+
     const userRef = db.collection('users').doc(userId);
     const configRef = db.collection('app_settings').doc('config');
 
@@ -198,7 +324,7 @@ exports.verifytaskandaddpoints = onDocumentCreated("completed_tasks/{taskId}", a
                 })
             });
             
-            t.update(snap.ref, { status: 'verified', processedAt: admin.firestore.FieldValue.serverTimestamp() });
+            t.update(snap.ref, { status: 'verified', rewardAmount: adPoints, processedAt: admin.firestore.FieldValue.serverTimestamp() });
         });
     } catch (error) { console.error("❌ Ads Verification Error:", error); }
 });
@@ -278,13 +404,13 @@ exports.syncGlobalStats = onDocumentUpdated("users/{userId}", async (event) => {
     }
 });
 
-exports.resetDailyStats = onSchedule("0 0 * * *", async (event) => {
+exports.resetDailyStats = onSchedule("0 0 * * *", async () => {
     try {
         await db.collection('app_settings').doc('config').update({ daily_points: 0 });
     } catch (err) { console.error(err); }
 });
 
-exports.resetWeeklyLeaderboard = onSchedule("0 0 * * 0", async (event) => {
+exports.resetWeeklyLeaderboard = onSchedule("0 0 * * 0", async () => {
     try {
         await db.collection('app_settings').doc('config').update({ weekly_points: 0 });
         const usersRef = db.collection('users');

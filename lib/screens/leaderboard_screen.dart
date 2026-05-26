@@ -56,26 +56,47 @@ class LeaderboardScreen extends StatelessWidget {
                   itemCount: snap.data!.docs.length,
                   itemBuilder: (context, i) {
                     var d = snap.data!.docs[i].data() as Map<String, dynamic>;
-                    return Card(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15)),
+                    
+                    bool isTop1 = i == 0;
+                    bool isTop2 = i == 1;
+                    bool isTop3 = i == 2;
+                    
+                    Color bgColor = isTop1 ? Colors.amber.withValues(alpha: 0.15) 
+                        : (isTop2 ? Colors.blueGrey.withValues(alpha: 0.15) 
+                        : (isTop3 ? Colors.deepOrange.withValues(alpha: 0.15) 
+                        : Colors.white.withValues(alpha: 0.03)));
+                        
+                    Color borderColor = isTop1 ? Colors.amber.withValues(alpha: 0.6) 
+                        : (isTop2 ? Colors.blueGrey.withValues(alpha: 0.5) 
+                        : (isTop3 ? Colors.deepOrange.withValues(alpha: 0.5) 
+                        : Colors.transparent));
+
+                    return Container(
+                      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 5),
+                      decoration: BoxDecoration(
+                        color: bgColor,
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: borderColor, width: isTop1 ? 1.5 : 1.0),
+                        boxShadow: isTop1 ? [BoxShadow(color: Colors.amber.withValues(alpha: 0.1), blurRadius: 10, spreadRadius: 1)] : [],
+                      ),
                       child: ListTile(
                         leading: _buildRankBadge(i + 1),
                         title: Text(
                           d['name'] ?? tr('unknown_player'),
-                          style: const TextStyle(
-                              color: Colors.white, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              color: isTop1 ? Colors.amber : Colors.white, 
+                              fontWeight: isTop1 ? FontWeight.w900 : FontWeight.bold,
+                              fontSize: isTop1 ? 17 : 15),
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
                               "${d['points']}",
-                              style: const TextStyle(
-                                  color: Colors.amber,
+                              style: TextStyle(
+                                  color: isTop1 ? Colors.amberAccent : Colors.greenAccent,
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 16),
+                                  fontSize: isTop1 ? 18 : 16),
                             ),
                             const SizedBox(width: 5),
                             Text(tr('points_unit'),
@@ -109,13 +130,17 @@ class LeaderboardScreen extends StatelessWidget {
           margin: const EdgeInsets.all(15),
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
+              gradient: const LinearGradient(
+                colors: [Color(0xFF2A0845), Color(0xFF6441A5)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
               borderRadius: BorderRadius.circular(25),
-              border: Border.all(color: Colors.white10),
+              border: Border.all(color: Colors.amber.withValues(alpha: 0.4), width: 1.5),
               boxShadow: [
                 BoxShadow(
-                    color: Colors.amber.withValues(alpha: 0.02),
-                    blurRadius: 20,
+                    color: Colors.deepPurpleAccent.withValues(alpha: 0.3),
+                    blurRadius: 25,
                     spreadRadius: 2)
               ]),
           child: Column(
@@ -146,12 +171,14 @@ class LeaderboardScreen extends StatelessWidget {
                   _statItem(
                       tr('total_users'),
                       data['total_users']?.toString() ?? "0",
-                      Icons.people_outline),
+                      Icons.people_outline,
+                      Colors.cyanAccent),
                   _statDivider(),
                   _statItem(
                       tr('total_points'),
                       data['total_points_distributed']?.toString() ?? "0",
-                      Icons.stars_rounded),
+                      Icons.stars_rounded,
+                      Colors.amber),
                 ],
               ),
               const Divider(color: Colors.white10, height: 30),
@@ -160,12 +187,14 @@ class LeaderboardScreen extends StatelessWidget {
                   _statItem(
                       tr('weekly_points'),
                       data['weekly_points']?.toString() ?? "0",
-                      Icons.calendar_today_outlined),
+                      Icons.calendar_today_outlined,
+                      Colors.purpleAccent),
                   _statDivider(),
                   _statItem(
                       tr('daily_points'),
                       data['daily_points']?.toString() ?? "0",
-                      Icons.bolt_rounded),
+                      Icons.bolt_rounded,
+                      Colors.greenAccent),
                 ],
               ),
             ],
@@ -175,11 +204,11 @@ class LeaderboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _statItem(String label, String value, IconData icon) {
+  Widget _statItem(String label, String value, IconData icon, Color iconColor) {
     return Expanded(
       child: Column(
         children: [
-          Icon(icon, color: Colors.amber.withValues(alpha: 0.8), size: 20),
+          Icon(icon, color: iconColor, size: 24),
           const SizedBox(height: 8),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 500),
@@ -210,17 +239,34 @@ class LeaderboardScreen extends StatelessWidget {
   }
 
   Widget _buildRankBadge(int rank) {
-    Color color = Colors.grey;
-    if (rank == 1) color = Colors.amber;
-    if (rank == 2) color = Colors.blueGrey;
-    if (rank == 3) color = Colors.brown;
+    List<Color> gradientColors;
+    Color textColor = Colors.white;
+    
+    if (rank == 1) {
+      gradientColors = [Colors.yellowAccent, Colors.orange];
+      textColor = Colors.black;
+    } else if (rank == 2) {
+      gradientColors = [Colors.grey.shade300, Colors.grey.shade600];
+      textColor = Colors.black;
+    } else if (rank == 3) {
+      gradientColors = [Colors.orange.shade300, Colors.deepOrange.shade700];
+      textColor = Colors.white;
+    } else {
+      gradientColors = [Colors.blueGrey.shade800, Colors.black87];
+      textColor = Colors.white70;
+    }
 
-    return CircleAvatar(
-      backgroundColor: color,
-      radius: 15,
+    return Container(
+      width: 35,
+      height: 35,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(colors: gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+        boxShadow: rank <= 3 ? [BoxShadow(color: gradientColors[0].withValues(alpha: 0.4), blurRadius: 6, spreadRadius: 1)] : [],
+      ),
+      alignment: Alignment.center,
       child: Text("$rank",
-          style: const TextStyle(
-              color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12)),
+          style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 14)),
     );
   }
 }

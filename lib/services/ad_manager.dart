@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:startapp_sdk/startapp.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AdManager {
   // معرفات الإعلانات
@@ -30,14 +29,14 @@ class AdManager {
   static final StartAppSdk _startAppSdk = StartAppSdk();
   static StartAppRewardedVideoAd? _startAppRewardedVideoAd;
   static StartAppInterstitialAd? _startAppInterstitialAd;
-  static StartAppBannerAd? _startAppBannerAd;
 
   static bool _isStartAppVideoLoading = false;
   static bool _isStartAppInterstitialLoading = false;
-  static bool _isStartAppBannerLoading = false;
   static bool _isShowingAd = false;
+  static DateTime _lastAdCloseTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   static VoidCallback? onAdClosedCallback;
+  static VoidCallback? onVideoCompletedCallback;
 
   static bool get isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
@@ -47,10 +46,11 @@ class AdManager {
     MobileAds.instance.initialize();
     loadAppOpenAd();
     loadAdMobInterstitial();
-    _startAppSdk.setTestAdsEnabled(false);
+    
+    // ✅ تفعيل الإعلانات التجريبية مؤقتاً للتأكد من ظهور الإعلانات (قم بإعادتها إلى false قبل النشر)
+    _startAppSdk.setTestAdsEnabled(false); 
     loadServer1Ad();
     loadStartAppInterstitial();
-    loadStartAppBanner();
   }
 
   // ==================== سيرفر 1 (Start.io) ====================
@@ -68,39 +68,27 @@ class AdManager {
         .loadRewardedVideoAd(
       onAdNotDisplayed: () => _clearAndReloadServer1(),
       onAdHidden: () {
-        debugPrint("🔔 إغلاق إعلان سيرفر 1: جاري تنفيذ الكولباك...");
+        _isShowingAd = false;
+        _lastAdCloseTime = DateTime.now();
+        debugPrint("🔔 إغلاق إعلان سيرفر 1...");
 
-        // 2. إطلاق الكولباك بأمان داخل try-catch
         try {
           if (onAdClosedCallback != null) {
             onAdClosedCallback!();
-            // 3. هام جداً: تصفير الكولباك لمنع إعادة النداء بشكل خاطئ
-            onAdClosedCallback = null;
           }
         } catch (e) {
           debugPrint("❌ خطأ في تنفيذ الكولباك: $e");
         }
 
-        // 4. تأجيل عملية التنظيف لضمان أن الواجهة قد تعاملت مع الكولباك أولاً
         Future.delayed(const Duration(milliseconds: 500), () {
           _clearAndReloadServer1();
         });
       },
-      onVideoCompleted: () async {
-        debugPrint("👑 الفيديو اكتمل، جاري تحديث النقاط...");
-        try {
-          final config = await FirebaseFirestore.instance
-              .collection('app_settings')
-              .doc('config')
-              .get();
-
-          if (config.exists) {
-            _assignPointsToFirestore(
-                config.data()?['video_cooldown_seconds'] ?? 300,
-                config.data()?['unity_points'] ?? 10);
-          }
-        } catch (e) {
-          debugPrint("❌ Firebase Error: $e");
+      onVideoCompleted: () {
+        debugPrint("👑 الفيديو اكتمل، جاري تجهيز دولاب الحظ...");
+        if (onVideoCompletedCallback != null) {
+          onVideoCompletedCallback!();
+          onVideoCompletedCallback = null;
         }
       },
     )
@@ -118,8 +106,18 @@ class AdManager {
   static void showServer1Ad(BuildContext context) {
     if (_startAppRewardedVideoAd != null) {
       try {
-        _startAppRewardedVideoAd!.show();
+        _isShowingAd = true;
+        _startAppRewardedVideoAd!.show().then((shown) {
+          if (shown == false) {
+            _isShowingAd = false;
+            _clearAndReloadServer1();
+          }
+        }).catchError((e) {
+          _isShowingAd = false;
+          _clearAndReloadServer1();
+        });
       } catch (e) {
+        _isShowingAd = false;
         _clearAndReloadServer1();
       }
     } else {
@@ -136,6 +134,7 @@ class AdManager {
     } catch (_) {}
     _startAppRewardedVideoAd = null;
     _isStartAppVideoLoading = false;
+    onVideoCompletedCallback = null;
     Future.delayed(const Duration(seconds: 3), () => loadServer1Ad());
   }
 
@@ -173,7 +172,12 @@ class AdManager {
           _rewardedAd = ad;
 
           ad.fullScreenContentCallback = FullScreenContentCallback(
+            onAdShowedFullScreenContent: (ad) {
+              _isShowingAd = true;
+            },
             onAdDismissedFullScreenContent: (ad) {
+              _isShowingAd = false;
+              _lastAdCloseTime = DateTime.now();
               ad.dispose();
               _rewardedAd = null;
 
@@ -185,6 +189,7 @@ class AdManager {
               });
             },
             onAdFailedToShowFullScreenContent: (ad, error) {
+              _isShowingAd = false;
               ad.dispose();
               _rewardedAd = null;
               onFailed();
@@ -192,8 +197,10 @@ class AdManager {
           );
 
           try {
+            _isShowingAd = true;
             ad.show(onUserEarnedReward: (ad, reward) => onReward());
           } catch (e) {
+            _isShowingAd = false;
             _isRewardedAdLoading = false;
             onFailed();
           }
@@ -205,25 +212,6 @@ class AdManager {
       ),
     );
   }
-  // ==================== البانر الذكي الهجين ====================
-
-  static Widget smartBanner(BannerAd? loginBanner) {
-    if (isAdmin) return const SizedBox.shrink();
-
-    // إذا كان بانر AdMob جاهزاً
-    if (_adMobBannerAd != null) {
-      return SizedBox(height: 50, child: AdWidget(ad: _adMobBannerAd!));
-    }
-
-    // إذا كان بانر StartApp جاهزاً
-    if (_startAppBannerAd != null) {
-      return SizedBox(height: 50, child: StartAppBanner(_startAppBannerAd!));
-    }
-
-    return const SizedBox.shrink();
-  }
-
-  // ✅ إصلاح جذري: تحميل البانر مرة واحدة فقط وتخزينه
   static void loadAdMobBanner() {
     if (_adMobBannerAd != null) return;
     _adMobBannerAd = BannerAd(
@@ -239,19 +227,6 @@ class AdManager {
     )..load();
   }
 
-  static void loadStartAppBanner() {
-    if (isAdmin || _isStartAppBannerLoading || _startAppBannerAd != null) {
-      return;
-    }
-    _isStartAppBannerLoading = true;
-    _startAppSdk.loadBannerAd(StartAppBannerType.BANNER).then((ad) {
-      _startAppBannerAd = ad;
-      _isStartAppBannerLoading = false;
-    }).catchError((_) {
-      _isStartAppBannerLoading = false;
-    });
-  }
-
   // ==================== إعلانات بينية ذكية ====================
 
   static void showSmartAd() {
@@ -264,22 +239,36 @@ class AdManager {
           _isShowingAd = true;
           _interstitialAd!.fullScreenContentCallback =
               FullScreenContentCallback(
+            onAdShowedFullScreenContent: (ad) {
+              _isShowingAd = true;
+            },
             onAdDismissedFullScreenContent: (ad) {
-              ad.dispose();
               _isShowingAd = false;
+              _lastAdCloseTime = DateTime.now();
+              ad.dispose();
               loadAdMobInterstitial();
             },
             onAdFailedToShowFullScreenContent: (ad, err) {
-              ad.dispose();
               _isShowingAd = false;
+              ad.dispose();
               loadAdMobInterstitial();
             },
           );
-          _interstitialAd!.show();
+          try {
+            _interstitialAd!.show();
+          } catch (e) {
+            _isShowingAd = false;
+            loadAdMobInterstitial();
+          }
           _interstitialAd = null;
         } else if (_startAppInterstitialAd != null) {
           _isShowingAd = true;
           _startAppInterstitialAd!.show().then((_) {
+            _isShowingAd = false;
+            _lastAdCloseTime = DateTime.now();
+            _startAppInterstitialAd = null;
+            loadStartAppInterstitial();
+          }).catchError((_) {
             _isShowingAd = false;
             _startAppInterstitialAd = null;
             loadStartAppInterstitial();
@@ -330,46 +319,44 @@ class AdManager {
   }
 
   static void showAppOpenAdOnce() {
-    if (isAdmin || _isShowingAppOpenAd || _appOpenAd == null) return;
+    if (isAdmin || _isShowingAppOpenAd || _appOpenAd == null || _isShowingAd) return;
+    if (DateTime.now().difference(_lastAdCloseTime).inSeconds < 5) return;
+
+    _isShowingAppOpenAd = true;
+    _isShowingAd = true;
+
     _appOpenAd!.fullScreenContentCallback = FullScreenContentCallback(
-      onAdShowedFullScreenContent: (_) => _isShowingAppOpenAd = true,
+      onAdShowedFullScreenContent: (_) {
+        _isShowingAppOpenAd = true;
+        _isShowingAd = true;
+      },
       onAdDismissedFullScreenContent: (ad) {
+        _isShowingAd = false;
+        _lastAdCloseTime = DateTime.now();
         ad.dispose();
         _appOpenAd = null;
         _isShowingAppOpenAd = false;
+        loadAppOpenAd(); // تحميل الإعلان مجدداً ليكون جاهزاً للفتحة القادمة
       },
       onAdFailedToShowFullScreenContent: (ad, _) {
+        _isShowingAd = false;
         ad.dispose();
         _appOpenAd = null;
         _isShowingAppOpenAd = false;
+        loadAppOpenAd();
       },
     );
-    _appOpenAd!.show();
+    try {
+      _appOpenAd!.show();
+    } catch (e) {
+      _isShowingAd = false;
+      _isShowingAppOpenAd = false;
+      _appOpenAd = null;
+    }
   }
 
   // ==================== Firestore Points ====================
 
-  static Future<void> _assignPointsToFirestore(
-      int cooldownSeconds, int unityPoints) async {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null || isAdmin) return;
-
-    final batch = FirebaseFirestore.instance.batch();
-    batch.update(
-        FirebaseFirestore.instance.collection('users').doc(currentUser.uid), {
-      'points': FieldValue.increment(unityPoints),
-      'unity_cooldown_until': Timestamp.fromDate(
-          DateTime.now().add(Duration(seconds: cooldownSeconds))),
-    });
-    batch.set(FirebaseFirestore.instance.collection('completed_tasks').doc(), {
-      'userId': currentUser.uid,
-      'taskType': 'server1_ad',
-      'rewardAmount': unityPoints,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
-    await batch.commit();
-    _clearAndReloadServer1();
-  }
 
   // ✅ دالة البوابة: هل يمكن للمستخدم الدخول لدولاب الحظ؟
   static bool canAccessLuckyWheel() {

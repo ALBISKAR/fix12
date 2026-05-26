@@ -17,6 +17,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   final TextEditingController _pinController = TextEditingController();
   final String _adminPin = "438093";
   final String _allowedUid = "OeEwi4nMZrPjRLRiqWf1373btQT2";
+  String _searchQuery = "";
 
   // --- دوال التحكم والأمن ---
   void _checkPin() {
@@ -195,6 +196,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       stream: FirebaseFirestore.instance
           .collection(collection)
           .where('status', isEqualTo: 'pending')
+          .limit(50) // 🚀 تحسين الأداء: تحميل 50 طلب كحد أقصى لمنع استهلاك الذاكرة وتشنج الشاشة
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
@@ -228,15 +230,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     IconButton(
                         icon: const Icon(Icons.check_circle,
                             color: Colors.greenAccent),
-                        onPressed: () async {
-                          await doc.reference.update({'status': 'approved'});
-                          if (collection == 'reset_requests' &&
-                              data['userId'] != null) {
-                            await FirebaseFirestore.instance
-                                .collection('users')
-                                .doc(data['userId'])
-                                .update(
-                                    {'isBanned': false, 'status': 'active'});
+                        onPressed: () {
+                          if (collection == 'reset_requests') {
+                            _approveResetRequest(
+                                context,
+                                data['email'] ?? '',
+                                data['device_id'] ?? '',
+                                doc.id);
+                          } else {
+                            doc.reference.update({'status': 'approved'});
                           }
                         }),
                   ],
@@ -253,12 +255,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Widget _buildUsersListTab() {
     return Column(
       children: [
+        _buildStatsHeader(), // إضافة شريط الإحصائيات هنا
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+          child: TextField(
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: "ابحث بالاسم أو البريد الإلكتروني...",
+              hintStyle: const TextStyle(color: Colors.white54),
+              prefixIcon: const Icon(Icons.search, color: Colors.amber),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.05),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            ),
+            onChanged: (val) => setState(() => _searchQuery = val),
+          ),
+        ),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('users')
-                .orderBy('points', descending: true)
-                .snapshots(),
+            stream: _buildUserQuery().snapshots(),
             builder: (context, snapshot) {
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
@@ -272,8 +290,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   return Card(
                     color: Colors.white.withValues(alpha: 0.05),
                     child: ListTile(
-                      onTap: () => _showUserHistory(
-                          userDoc.id, userData['name'] ?? "مستخدم"),
+                      onTap: () => _showUserDetails(userDoc.id),
                       title: Text(userData['name'] ?? "مستخدم",
                           style: const TextStyle(color: Colors.white)),
                       subtitle: Text("${userData['points'] ?? 0} نقطة"),
@@ -303,6 +320,63 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         ),
       ],
+    );
+  }
+
+  // --- بناء شريط الإحصائيات (سريع ولا يستهلك قراءات فايربيس) ---
+  Widget _buildStatsHeader() {
+    return FutureBuilder(
+      future: Future.wait([
+        FirebaseFirestore.instance.collection('users').count().get(),
+        FirebaseFirestore.instance.collection('withdrawals').where('status', isEqualTo: 'pending').count().get(),
+        FirebaseFirestore.instance.collection('reset_requests').where('status', isEqualTo: 'pending').count().get(),
+      ]),
+      builder: (context, AsyncSnapshot<List<AggregateQuerySnapshot>> snapshot) {
+        if (!snapshot.hasData) {
+          return const Padding(
+            padding: EdgeInsets.all(15.0),
+            child: Center(child: CircularProgressIndicator(color: Colors.amber)),
+          );
+        }
+        int totalUsers = snapshot.data![0].count ?? 0;
+        int pendingWithdrawals = snapshot.data![1].count ?? 0;
+        int pendingResets = snapshot.data![2].count ?? 0;
+        
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          child: Row(
+            children: [
+              _statCard("المستخدمين", totalUsers.toString(), Icons.group, Colors.blueAccent),
+              const SizedBox(width: 8),
+              _statCard("سحوبات معلقة", pendingWithdrawals.toString(), Icons.monetization_on, Colors.greenAccent),
+              const SizedBox(width: 8),
+              _statCard("طلبات أجهزة", pendingResets.toString(), Icons.phonelink_lock, Colors.orangeAccent),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _statCard(String title, String value, IconData icon, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 5),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 26),
+            const SizedBox(height: 8),
+            Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(title, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+          ],
+        ),
+      ),
     );
   }
 
@@ -405,6 +479,46 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  Future<void> _approveResetRequest(BuildContext context, String email,
+      String newDeviceId, String requestId) async {
+    try {
+      var userQuery = await FirebaseFirestore.instance
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+
+      if (userQuery.docs.isNotEmpty) {
+        await userQuery.docs.first.reference.update({
+          'device_id': newDeviceId,
+          'deviceId': newDeviceId, // ضمان التوافق
+          'isBanned': false,
+          'isLocked': false,
+        });
+
+        await FirebaseFirestore.instance
+            .collection('reset_requests')
+            .doc(requestId)
+            .update({
+          'status': 'approved',
+          'approvedAt': FieldValue.serverTimestamp(),
+        });
+
+        if (!context.mounted) return;
+        _showSuccessMessage("تم تفعيل الجهاز وفك الحظر بنجاح ✅");
+      } else {
+        _showError("لم يتم العثور على حساب بهذا البريد الإلكتروني.");
+      }
+    } catch (e) {
+      _showError("خطأ أثناء معالجة الطلب: ${e.toString()}");
+    }
+  }
+
+  void _showSuccessMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(message), backgroundColor: Colors.green));
+  }
+
   void _editConfigDialog(String key, dynamic currentValue) {
     TextEditingController editController =
         TextEditingController(text: currentValue.toString());
@@ -501,87 +615,156 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ));
   }
 
-  void _showUserHistory(String uid, String name) {
+  Query _buildUserQuery() {
+    Query query = FirebaseFirestore.instance.collection('users');
+    if (_searchQuery.trim().isNotEmpty) {
+      String search = _searchQuery.trim();
+      // تحديد نوع البحث بناءً على وجود علامة @ للإيميل
+      if (search.contains('@')) {
+        return query.where('email', isEqualTo: search);
+      } else {
+        return query
+            .where('name', isGreaterThanOrEqualTo: search)
+            .where('name', isLessThanOrEqualTo: '$search\uf8ff');
+      }
+    }
+    // العرض الافتراضي: أعلى 100 مستخدم
+    return query.orderBy('points', descending: true).limit(100);
+  }
+
+  void _showUserDetails(String uid) {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, // لجعل النافذة قابلة للتمدد
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF1A1A2E),
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => SizedBox(
-        height: MediaQuery.of(context).size.height *
-            0.7, // ارتفاع النافذة 70% من الشاشة
-        child: StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('users')
-              .doc(uid)
-              .snapshots(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData) {
-              return const Center(
-                  child: CircularProgressIndicator(color: Colors.amber));
-            }
+        height: MediaQuery.of(context).size.height * 0.85,
+        child: DefaultTabController(
+          length: 2,
+          child: Column(
+            children: [
+              const TabBar(
+                indicatorColor: Colors.amber,
+                labelColor: Colors.amber,
+                unselectedLabelColor: Colors.white54,
+                tabs: [
+                  Tab(icon: Icon(Icons.manage_accounts), text: "البيانات"),
+                  Tab(icon: Icon(Icons.history), text: "سجل النقاط"),
+                ],
+              ),
+              Expanded(
+                child: StreamBuilder<DocumentSnapshot>(
+                  stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator(color: Colors.amber));
+                    }
+                    var userData = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+                    var history = userData['points_history'] as List? ?? [];
+                    List sortedHistory = history.reversed.toList();
 
-            var userData = snapshot.data!.data() as Map<String, dynamic>?;
-            var history = userData?['points_history'] as List? ?? [];
-            // عكس القائمة لعرض أحدث العمليات في الأعلى
-            List sortedHistory = history.reversed.toList();
-
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Text("سجل نقاط: $name",
-                      style: const TextStyle(
-                          color: Colors.amber,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold)),
-                ),
-                Expanded(
-                  child: sortedHistory.isEmpty
-                      ? const Center(
-                          child: Text("لا توجد سجلات لهذا المستخدم",
-                              style: TextStyle(color: Colors.white24)))
-                      : ListView.builder(
-                          itemCount: sortedHistory.length,
-                          itemBuilder: (context, i) {
-                            var item = sortedHistory[i] as Map<String, dynamic>;
-
-                            // التعامل مع التاريخ (تحويل Timestamp إلى نص)
-                            String formattedDate = "غير معروف";
-                            if (item['timestamp'] != null) {
-                              DateTime date =
-                                  (item['timestamp'] as Timestamp).toDate();
-                              formattedDate = DateFormat('yyyy/MM/dd - hh:mm a')
-                                  .format(date);
-                            }
-
-                            int amount = item['amount'] ?? 0;
-                            String type = item['type'] ?? "عملية";
-
-                            return ListTile(
-                              title: Text(type,
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 14)),
-                              subtitle: Text(formattedDate,
-                                  style: const TextStyle(
-                                      color: Colors.white38, fontSize: 11)),
-                              trailing: Text(
-                                amount >= 0 ? "+$amount" : "$amount",
-                                style: TextStyle(
-                                    color: amount >= 0
-                                        ? Colors.greenAccent
-                                        : Colors.redAccent,
-                                    fontWeight: FontWeight.bold),
+                    return TabBarView(
+                      children: [
+                        // Tab 1: كل بيانات المستخدم (مع إمكانية التعديل)
+                        ListView(
+                          padding: const EdgeInsets.all(15),
+                          children: userData.keys.map((key) {
+                            if (key == 'points_history') return const SizedBox();
+                            bool isComplex = userData[key] is List || userData[key] is Map;
+                            return Card(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                title: Text(key, style: const TextStyle(color: Colors.amber, fontSize: 13)),
+                                subtitle: Text(userData[key].toString(), style: const TextStyle(color: Colors.white)),
+                                trailing: isComplex ? null : IconButton(
+                                  icon: const Icon(Icons.edit, color: Colors.blueAccent),
+                                  onPressed: () => _editUserFieldDialog(uid, key, userData[key]),
+                                ),
                               ),
                             );
-                          },
+                          }).toList(),
                         ),
+                        // Tab 2: سجل النقاط المطور (محمي ضد أخطاء التواريخ)
+                        sortedHistory.isEmpty
+                            ? const Center(child: Text("لا توجد سجلات لهذا المستخدم", style: TextStyle(color: Colors.white24)))
+                            : ListView.builder(
+                                itemCount: sortedHistory.length,
+                                itemBuilder: (context, i) {
+                                  var item = sortedHistory[i] as Map<String, dynamic>;
+                                  String formattedDate = "غير معروف";
+                                  if (item['timestamp'] != null) {
+                                    DateTime date;
+                                    if (item['timestamp'] is Timestamp) {
+                                      date = (item['timestamp'] as Timestamp).toDate();
+                                    } else {
+                                      date = DateTime.tryParse(item['timestamp'].toString()) ?? DateTime.now();
+                                    }
+                                    formattedDate = DateFormat('yyyy/MM/dd - hh:mm a').format(date);
+                                  }
+                                  int amount = (item['amount'] ?? 0).toInt();
+                                  String type = item['type'] ?? "عملية";
+                                  return ListTile(
+                                    title: Text(type, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                                    subtitle: Text(formattedDate, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                                    trailing: Text(
+                                      amount >= 0 ? "+$amount" : "$amount",
+                                      style: TextStyle(
+                                          color: amount >= 0 ? Colors.greenAccent : Colors.redAccent,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ],
+                    );
+                  },
                 ),
-              ],
-            );
-          },
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  void _editUserFieldDialog(String uid, String key, dynamic currentValue) {
+    TextEditingController editController = TextEditingController(text: currentValue.toString());
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: Text("تعديل $key", style: const TextStyle(color: Colors.amber)),
+        content: TextField(controller: editController, style: const TextStyle(color: Colors.white)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("إلغاء", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+            onPressed: () async {
+              dynamic finalValue = editController.text;
+              // محاولة اكتشاف نوع الحقل تلقائياً لحفظه بشكل صحيح في قاعدة البيانات
+              if (currentValue is int) {
+                finalValue = int.tryParse(editController.text) ?? currentValue;
+              } else if (currentValue is double) {
+                finalValue = double.tryParse(editController.text) ?? currentValue;
+              } else if (currentValue is bool) {
+                finalValue = editController.text.toLowerCase() == 'true';
+              }
+
+              try {
+                await FirebaseFirestore.instance.collection('users').doc(uid).update({key: finalValue});
+                if (ctx.mounted) Navigator.pop(ctx);
+              } catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text("خطأ: $e"), backgroundColor: Colors.red));
+                }
+              }
+            },
+            child: const Text("حفظ", style: TextStyle(color: Colors.black)),
+          ),
+        ],
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:provider/provider.dart';
 import 'package:syria_earn_pro/providers/theme_provider.dart';
 import 'package:flutter/material.dart';
@@ -18,6 +19,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:check_vpn_connection/check_vpn_connection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:http/http.dart' as http;
 // ✅ استيراد ملف خدمة Start.io (سيرفر 1) الجديد
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -32,19 +34,20 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _isWaiting = false;
-  int totalPoints = 0;
   bool _isAdProcessing = false;
   late TabController _tabController;
   late AnimationController _controller;
   late Animation<double> _animation;
   int _unitySecondsLeft = 0;
   int _admobSecondsLeft = 0;
-  int unityRewardPoints = 10;
-  int admobRewardPoints = 10;
   Timer? _unityTimer;
   Timer? _admobTimer;
-
   bool _canClaimDaily = false;
+
+  late PageController _arcadePageController;
+  Timer? _arcadeTimer;
+  int _arcadeCurrentPage = 0;
+  int _uniqueTasksLength = 0;
 
   bool get isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
@@ -117,6 +120,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
 
+    _arcadePageController = PageController(initialPage: 0);
+    _arcadeTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (_arcadePageController.hasClients && _uniqueTasksLength > 0) {
+        _arcadeCurrentPage++;
+        _arcadePageController.animateToPage(
+          _arcadeCurrentPage,
+          duration: const Duration(milliseconds: 600),
+          curve: Curves.easeInOut,
+        );
+      }
+    });
+
     // 1️⃣ أولاً: عمليات جلب البيانات الخفيفة والأساسية فوراً
     _startNetworkMonitoring();
     _startBanListener();
@@ -125,7 +140,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _checkDailyRewardStatus(user.uid);
-      _setupPointsStream();
 
       // 🔄 الربط الحاسم لكولباك إغلاق الإعلانات
       AdManager.onAdClosedCallback = () {
@@ -277,43 +291,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  void _setupPointsStream() {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .snapshots()
-          .listen((snapshot) {
-        if (snapshot.exists && mounted) {
-          setState(() {
-            totalPoints = (snapshot.data())?['points'] ?? 0;
-          });
-        }
-      }, onError: (error) {
-        debugPrint("📡 Stream Error: $error");
-      });
-    }
-  }
-
   Future<void> _loadUserData() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        DocumentSnapshot userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-
-        if (!mounted) return;
-
-        if (userDoc.exists) {
-          setState(() {
-            totalPoints =
-                (userDoc.data() as Map<String, dynamic>?)?['points'] ?? 0;
-          });
-        }
-      } else {
+      if (user == null) {
         if (!mounted) return;
         Navigator.pushReplacementNamed(context, '/login');
       }
@@ -554,7 +535,62 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     // إذا كنت أدمن، أو كان الوقت قد انتهى، سيستمر الكود إلى هنا:
 
+    Future<void> onLuckyWheelReward(int points) async {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      try {
+        WriteBatch batch = FirebaseFirestore.instance.batch();
+
+        DocumentReference userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+        batch.update(userRef, {
+          'points': FieldValue.increment(points),
+          'points_history': FieldValue.arrayUnion([
+            {
+              'taskId': 'lucky_wheel_${DateTime.now().millisecondsSinceEpoch}',
+              'amount': points,
+              'type': 'lucky_wheel_reward',
+              'timestamp': DateTime.now().toIso8601String(),
+            }
+          ]),
+        });
+
+        DocumentReference taskRef = FirebaseFirestore.instance.collection('completed_tasks').doc();
+        batch.set(taskRef, {
+          'userId': uid,
+          'taskType': 'lucky_wheel_reward',
+          'rewardAmount': points,
+          'status': 'verified',
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+
+        await batch.commit();
+
+        if (mounted) {
+          _startCooldownWithFirebase(server, uid, cooldown);
+          _showSuccessSnackBar(tr('you_won_points', args: [points.toString()]));
+        }
+      } catch (e) {
+        if (mounted) {
+          _showErrorSnackBar(tr('admob_connection_error'));
+          setState(() {
+            _isWaiting = false;
+            _isAdProcessing = false;
+          });
+        }
+      }
+    }
+
     if (server == "unity") {
+      AdManager.onVideoCompletedCallback = () {
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => LuckyWheelDialog(
+              onRewardEarned: onLuckyWheelReward,
+            ),
+          );
+        }
+      };
       AdManager.showServer1Ad(context);
     } else {
       setState(() {
@@ -562,23 +598,44 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _isWaiting = true;
       });
 
+      bool rewarded = false;
+      Timer? adSafetyTimer;
+
+      adSafetyTimer = Timer(const Duration(seconds: 30), () {
+        if (mounted) {
+          setState(() {
+            _isWaiting = false;
+            _isAdProcessing = false;
+          });
+        }
+      });
+
       AdManager.showAdMobVideo(
-        onReward: () async {
-          // فتح دولاب الحظ بعد مشاهدة الإعلان
+        onReward: () {
+          rewarded = true;
+        },
+        onAdClosed: () {
+          adSafetyTimer?.cancel();
           if (mounted) {
+            setState(() {
+              _isWaiting = false;
+              _isAdProcessing = false;
+            });
+          }
+          if (rewarded && mounted) {
             showDialog(
               context: context,
               barrierDismissible: false,
-              builder: (context) => LuckyWheelDialog(
+              builder: (ctx) => LuckyWheelDialog(
                 onRewardEarned: (points) {
-                  // تحديث المهمة بعد الفوز من الدولاب
-                  _completeAdTask(cooldown);
+                  onLuckyWheelReward(points);
                 },
               ),
             );
           }
         },
         onFailed: () {
+          adSafetyTimer?.cancel();
           if (mounted) {
             setState(() {
               _isWaiting = false;
@@ -588,35 +645,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           _showErrorSnackBar(tr('admob_ad_not_ready'));
         },
       );
-    }
-  }
-
-// ✅ دالة منفصلة لتأكيد المهمة (تأخذ مكان الكود الذي كان في onReward)
-  Future<void> _completeAdTask(int cooldown) async {
-    try {
-      // 1. تسجيل المهمة في السيرفر
-      await FirebaseFirestore.instance.collection('completed_tasks').add({
-        'userId': FirebaseAuth.instance.currentUser!.uid,
-        'taskType': 'admob_ad',
-        'timestamp': FieldValue.serverTimestamp(),
-        'status': 'pending',
-      });
-
-      // 2. تفعيل الـ Cooldown
-      if (mounted) {
-        _startCooldownWithFirebase(
-            "admob", FirebaseAuth.instance.currentUser!.uid, cooldown);
-        _showSuccessSnackBar(tr('admob_request_success'));
-      }
-    } catch (e) {
-      _showErrorSnackBar(tr('admob_connection_error'));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isWaiting = false;
-          _isAdProcessing = false;
-        });
-      }
     }
   }
 
@@ -668,10 +696,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
 // ✅ 1. فحص هل المستخدم يحق له المطالبة (يعتمد على حقل السلسلة النصية للتاريخ المحفوظ مسبقاً)
-  void _checkDailyRewardStatus(String uid) async {
+  Future<void> _checkDailyRewardStatus(String uid) async {
     try {
-      DateTime now = DateTime
-          .now(); // نستخدم وقت الهاتف للعرض فقط (آمن هنا لأن المنع الحقيقي في السيرفر)
+      // 🚀 استخدام توقيت UTC ليتطابق تماماً مع سيرفر فايربيس ويمنع أخطاء المنطقة الزمنية
+      DateTime now = DateTime.now().toUtc();
       String todayStr = "${now.year}-${now.month}-${now.day}";
 
       final userDocRef =
@@ -701,47 +729,136 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     } catch (_) {}
   }
 
-  // ✅ 2. المطالبة بالمكافأة (طلب بسيط للسيرفر)
-  void _claimDailyReward() async {
+  // ✅ 2. المطالبة بالمكافأة مباشرة من Cloud Function لتجنب PERMISSION_DENIED
+  Future<void> _claimDailyReward() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     if (!_canClaimDaily) {
-      _showErrorSnackBar(tr('reward_claimed')); // تم استلام المكافأة مسبقاً
+      DateTime now = DateTime.now().toUtc();
+      DateTime nextMidnight = DateTime.utc(now.year, now.month, now.day + 1);
+      Duration remaining = nextMidnight.difference(now);
+      String formattedTime = "${remaining.inHours.toString().padLeft(2, '0')}:${(remaining.inMinutes % 60).toString().padLeft(2, '0')}:${(remaining.inSeconds % 60).toString().padLeft(2, '0')}";
+      _showErrorSnackBar("${tr('next_reward_waiting')} $formattedTime");
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(tr('processing')),
-        duration: const Duration(seconds: 1),
+    setState(() => _canClaimDaily = false);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (ctx) => const PopScope(
+        canPop: false,
+        child: Center(child: CircularProgressIndicator(color: Colors.amber)),
       ),
     );
 
     try {
-      // 🚀 إرسال طلب للسيرفر: السيرفر سيتكفل بكل شيء (الوقت الحقيقي، الحساب، وتوزيع النقاط)
-      await FirebaseFirestore.instance.collection('reward_requests').add({
-        'userId': user.uid,
-        'timestamp':
-            FieldValue.serverTimestamp(), // السيرفر يضع وقته الحقيقي هنا
-        'status': 'pending'
-      });
+      final token = await user.getIdToken(true);
+      // 👇 استبدل هذا الرابط بالرابط الصحيح الذي ظهر لك بعد رفع الدالة بنجاح
+      final uri = Uri.parse('https://claimdailyreward-aa24flr7jq-uc.a.run.app');
 
-      // إظهار نافذة صغيرة للمستخدم تؤكد استلام الطلب
-      if (mounted) {
-        _showSuccessSnackBar(tr('reward_processing_msg'));
-        setState(() {
-          _canClaimDaily = false; // نقفل الزر فوراً لمنع السبام
-        });
+      final response = await http
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({'uid': user.uid}),
+          )
+          .timeout(const Duration(seconds: 20));
 
-        // إغلاق الـ Drawer إذا كان مفتوحاً
-        if (Scaffold.of(context).isDrawerOpen) {
-          Navigator.pop(context);
-        }
+      if (!mounted) return;
+
+      if (Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
       }
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data =
+            jsonDecode(response.body) as Map<String, dynamic>;
+        final int reward = (data['rewardAmount'] ?? 10).toInt();
+        await _checkDailyRewardStatus(user.uid);
+        _showDailyRewardSuccessDialog(reward);
+        return;
+      }
+
+      if (response.statusCode == 409) {
+        await _checkDailyRewardStatus(user.uid);
+        DateTime now = DateTime.now().toUtc();
+        DateTime nextMidnight = DateTime.utc(now.year, now.month, now.day + 1);
+        Duration remaining = nextMidnight.difference(now);
+        String formattedTime = "${remaining.inHours.toString().padLeft(2, '0')}:${(remaining.inMinutes % 60).toString().padLeft(2, '0')}:${(remaining.inSeconds % 60).toString().padLeft(2, '0')}";
+        _showErrorSnackBar("${tr('next_reward_waiting')} $formattedTime");
+        return;
+      }
+
+      if (response.statusCode == 401) {
+        debugPrint("❌ مكافأة يومية - غير مصرح: ${response.body}");
+        _showErrorSnackBar(tr('error_occurred'));
+        return;
+      }
+
+      debugPrint(
+          "❌ فشل استلام المكافأة! الكود: ${response.statusCode} | التفاصيل: ${response.body}");
+      _showErrorSnackBar(
+          "${tr('error_occurred')} (Code: ${response.statusCode})");
+      if (mounted) setState(() => _canClaimDaily = true);
     } catch (e) {
+      debugPrint("❌ استثناء في المكافأة اليومية: $e");
+      if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      if (mounted) setState(() => _canClaimDaily = true);
       _showErrorSnackBar(tr('error_occurred'));
     }
+  }
+
+  void _showDailyRewardSuccessDialog(int points) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Icon(Icons.card_giftcard_rounded,
+            color: Colors.amber, size: 60),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
+              tr('daily_reward'),
+              style: const TextStyle(color: Colors.white70, fontSize: 16),
+            ),
+            const SizedBox(height: 15),
+            Text(
+              "+$points",
+              style: const TextStyle(
+                color: Colors.greenAccent,
+                fontSize: 48,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              tr('points'),
+              style: const TextStyle(color: Colors.greenAccent, fontSize: 18),
+            ),
+          ],
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+            onPressed: () => Navigator.pop(ctx),
+            child:
+                Text(tr('got_it'), style: const TextStyle(color: Colors.black)),
+          )
+        ],
+      ),
+    );
   }
 
   Widget _buildMaintenanceScreen(String message) {
@@ -801,7 +918,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final themeProvider = Provider.of<ThemeProvider>(context);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 15),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -890,10 +1007,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildPointsDisplay(String? uid, int exchangeRate) {
-    final PageController arcadePageController = PageController(initialPage: 0);
-    int arcadeCurrentPage = 0;
-    Timer? arcadeTimer;
-
     return StreamBuilder<DocumentSnapshot>(
       stream:
           FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
@@ -923,7 +1036,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   "$points",
                   style: const TextStyle(
                       color: Colors.amber,
-                      fontSize: 60,
+                      fontSize: 45,
                       fontWeight: FontWeight.bold,
                       shadows: [Shadow(color: Colors.black45, blurRadius: 10)]),
                 ),
@@ -931,10 +1044,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   "≈ \$${dollarValue.toStringAsFixed(2)}",
                   style: TextStyle(
                       color: Colors.greenAccent.withValues(alpha: 0.8),
-                      fontSize: 18,
+                      fontSize: 15,
                       fontWeight: FontWeight.w500),
                 ),
-                const SizedBox(height: 15),
+                const SizedBox(height: 8),
 
                 // 1. الرسالة العالمية (Global Notification)
                 StreamBuilder<QuerySnapshot>(
@@ -987,9 +1100,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   },
                 ),
 
-                const SizedBox(height: 15),
+                const SizedBox(height: 8),
 
-                // 2. 🔥 شريط سجل استلام النقاط الحركي المستقر
+                // 2. 🔥 شريط سجل استلام النقاط الشخصي
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('completed_tasks')
@@ -999,7 +1112,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   builder: (context, tasksSnap) {
                     if (!tasksSnap.hasData || tasksSnap.data!.docs.isEmpty) {
                       return Container(
-                        height: 42,
+                        height: 38,
                         margin: const EdgeInsets.symmetric(horizontal: 25),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.03),
@@ -1025,46 +1138,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         seenDocIds.add(doc.id);
                         uniqueTasks.add(doc);
                       }
-                      if (uniqueTasks.length == 5) break;
+                      if (uniqueTasks.length == 10) break; // زيادة عدد الأخبار المعروضة
                     }
 
-                    return StatefulBuilder(
-                      builder: (context, setLocalState) {
-                        if (arcadeTimer == null || !arcadeTimer!.isActive) {
-                          arcadeTimer =
-                              Timer.periodic(const Duration(seconds: 2), (t) {
-                            if (arcadePageController.hasClients) {
-                              arcadeCurrentPage =
-                                  (arcadeCurrentPage + 1) % uniqueTasks.length;
-                              arcadePageController.animateToPage(
-                                arcadeCurrentPage,
-                                duration: const Duration(milliseconds: 400),
-                                curve: Curves.easeInOut,
-                              );
-                              setLocalState(() {});
-                            } else {
-                              t.cancel();
-                            }
-                          });
-                        }
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) {
+                        _uniqueTasksLength = uniqueTasks.length;
+                      }
+                    });
 
-                        return Container(
-                          height: 42,
-                          margin: const EdgeInsets.symmetric(horizontal: 25),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.03),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.02)),
-                          ),
-                          child: PageView.builder(
-                            controller: arcadePageController,
-                            itemCount: uniqueTasks.length,
-                            scrollDirection: Axis.vertical,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemBuilder: (context, index) {
-                              var taskData = uniqueTasks[index].data()
-                                  as Map<String, dynamic>;
+                    return Container(
+                      height: 38,
+                      margin: const EdgeInsets.symmetric(horizontal: 25),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.03),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.02)),
+                      ),
+                      child: PageView.builder(
+                        controller: _arcadePageController,
+                        scrollDirection: Axis.vertical,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemBuilder: (context, index) {
+                          var taskData = uniqueTasks[index % uniqueTasks.length].data()
+                              as Map<String, dynamic>;
 
                               String taskUid =
                                   taskData['userId'] ?? taskData['uid'] ?? '';
@@ -1089,29 +1187,47 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 }
                               }
 
-                              bool isAdMob = taskData['taskType'] == 'admob_ad';
-// ✅ فحص دقيق لنوع المهمة وعرض الترجمة المناسبة حسب ما هو مخزن في الفايربيس
-                              String serverName = "";
-                              if (taskData['taskType'] == 'admob_ad') {
-                                serverName = tr(
-                                    'admob_payout'); // يعرض "سيرفر 2" أو الاسم المترجم لأدموب
-                              } else if (taskData['taskType'] == 'server1_ad' ||
-                                  taskData['taskType'] == 'unity_ad') {
-                                serverName = tr(
-                                    'unity_payout'); // يعرض "سيرفر 1" المترجم الخاص بـ Start.io
-                              } else {
-                                serverName = taskData['taskType'] ??
-                                    ""; // أي نوع مهمة أخرى كالعروض
-                              }
+                            String taskType = taskData['taskType'] ?? '';
+                            String serverName = "";
+                            FaIconData taskIcon = FontAwesomeIcons.star;
+                            Color taskIconColor = Colors.amber;
 
-// 1. استخراج القيم من الفايربيس (تأكد من مطابقة أسماء الحقول في Firebase)
+                            if (taskType == 'admob_ad') {
+                              serverName = tr('admob_payout');
+                              taskIcon = FontAwesomeIcons.google;
+                              taskIconColor = Colors.blueAccent;
+                            } else if (taskType == 'server1_ad' || taskType == 'unity_ad') {
+                              serverName = tr('unity_payout');
+                              taskIcon = FontAwesomeIcons.gamepad;
+                              taskIconColor = Colors.amber;
+                            } else if (taskType == 'lucky_wheel_reward') {
+                              serverName = tr('spin_wheel');
+                              taskIcon = FontAwesomeIcons.dharmachakra;
+                              taskIconColor = Colors.purpleAccent;
+                            } else if (taskType == 'daily_reward') {
+                              serverName = tr('daily_reward');
+                              taskIcon = FontAwesomeIcons.gift;
+                              taskIconColor = Colors.greenAccent;
+                            } else if (taskType == 'offerwall_reward') {
+                              serverName = tr('offerwall_reward');
+                              taskIcon = FontAwesomeIcons.fire;
+                              taskIconColor = Colors.orangeAccent;
+                            } else if (taskType == 'referral_reward') {
+                              serverName = tr('referral_reward');
+                              taskIcon = FontAwesomeIcons.users;
+                              taskIconColor = Colors.cyanAccent;
+                            } else {
+                              serverName = taskType;
+                            }
+
                               int liveUnityPoints =
                                   (config['unity_points'] ?? 10).toInt();
                               int liveAdMobPoints =
                                   (config['admob_points'] ?? 10).toInt();
+                            bool isAdMob = taskType == 'admob_ad';
 
-// 3. التحديد الديناميكي للنقاط
                               int earnedPoints = (taskData['rewardAmount'] ??
+                                    taskData['amount'] ??
                                       taskData['points'] ??
                                       (isAdMob
                                           ? liveAdMobPoints
@@ -1129,13 +1245,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                       Row(
                                         children: [
                                           FaIcon(
-                                            isAdMob
-                                                ? FontAwesomeIcons.google
-                                                : FontAwesomeIcons.gamepad,
+                                          taskIcon,
                                             size: 13,
-                                            color: isAdMob
-                                                ? Colors.blueAccent
-                                                : Colors.amber,
+                                          color: taskIconColor,
                                           ),
                                           const SizedBox(width: 8),
                                           RichText(
@@ -1212,13 +1324,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                         Row(
                                           children: [
                                             FaIcon(
-                                              isAdMob
-                                                  ? FontAwesomeIcons.google
-                                                  : FontAwesomeIcons.gamepad,
+                                            taskIcon,
                                               size: 13,
-                                              color: isAdMob
-                                                  ? Colors.blueAccent
-                                                  : Colors.amber,
+                                            color: taskIconColor,
                                             ),
                                             const SizedBox(width: 8),
                                             RichText(
@@ -1273,11 +1381,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               );
                             },
                           ),
-                        );
-                      },
                     );
                   },
                 ),
+
+                const SizedBox(height: 5),
               ],
             );
           },
@@ -1293,11 +1401,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       children: [
         _buildVideoServerCard(
           title: tr('unity_payout'),
-          // ✅ تم جعل الوصف قابلاً للترجمة ويمرر النقاط الديناميكية بشكل صحيح
           sub: _unitySecondsLeft > 0
               ? "${tr('wait')} ${_formatTime(_unitySecondsLeft)}"
-              : tr('watch_video_earn', args: [unityPoints.toString()]),
-          points: unityPoints,
+              : tr('lucky_wheel_prompt'), // "أدر العجلة واربح نقاطاً عشوائية!"
           icon: FontAwesomeIcons.gamepad,
           remaining: unityRemaining,
           isPremium: true,
@@ -1313,11 +1419,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         const SizedBox(height: 20),
         _buildVideoServerCard(
           title: tr('admob_payout'),
-          // ✅ تم تطبيق نفس الشيء لسيرفر أدموب
           sub: _admobSecondsLeft > 0
               ? "${tr('wait')} ${_formatTime(_admobSecondsLeft)}"
-              : tr('watch_video_earn', args: [admobPoints.toString()]),
-          points: admobPoints,
+              : tr('lucky_wheel_prompt'),
           icon: FontAwesomeIcons.google,
           remaining: admobRemaining,
           isPremium: false,
@@ -1329,7 +1433,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             _handleAdSelection(server: "admob", cooldown: cooldownSeconds);
           },
         ),
-        const SizedBox(height: 80),
+        const SizedBox(height: 20),
       ],
     );
   }
@@ -1337,7 +1441,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget _buildVideoServerCard({
     required String title,
     required String sub,
-    required int points,
     required dynamic icon,
     required VoidCallback onTap,
     required int remaining,
@@ -1355,7 +1458,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ),
       child: ListTile(
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 25),
         leading: ShaderMask(
           shaderCallback: (Rect bounds) => LinearGradient(
             colors: isPremium
@@ -1364,22 +1467,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ).createShader(bounds),
-          child: FaIcon(icon as FaIconData?, color: Colors.white, size: 42),
+          child: FaIcon(icon as FaIconData?, color: Colors.white, size: 50),
         ),
         title: Text(title,
             style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: 20)),
+                fontSize: 22)),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 5),
+            const SizedBox(height: 8),
             Text(sub,
-                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                style: const TextStyle(color: Colors.white70, fontSize: 15)),
             const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: remaining > 0
                     ? Colors.green.withValues(alpha: 0.2)
@@ -1390,19 +1493,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 "${tr('remaining')}: $remaining",
                 style: TextStyle(
                   color: remaining > 0 ? Colors.greenAccent : Colors.redAccent,
-                  fontSize: 12,
+                  fontSize: 14,
                   fontWeight: FontWeight.w900,
                 ),
               ),
             ),
           ],
         ),
-        trailing: Text(
-          "+$points",
-          style: const TextStyle(
-              color: Colors.greenAccent,
-              fontWeight: FontWeight.w900,
-              fontSize: 18),
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SpinningWheelIcon(),
+            const SizedBox(height: 5),
+            const Text(
+              "1 ~ 10",
+              style: TextStyle(
+                  color: Colors.greenAccent,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 14),
+            ),
+          ],
         ),
         onTap: remaining > 0 ? onTap : null,
       ),
@@ -1644,8 +1754,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             subtitle:
                 _canClaimDaily ? tr('reward_available') : tr('reward_claimed'),
             onTap: () {
-              Navigator.pop(context);
-              _claimDailyReward();
+              Navigator.of(context).pop();
+              Future.microtask(() {
+                if (mounted) _claimDailyReward();
+              });
             },
             showBadge: _canClaimDaily,
           ),
@@ -1782,7 +1894,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       margin: const EdgeInsets.only(bottom: 15),
       child: ListTile(
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
         leading: ShaderMask(
           shaderCallback: (Rect bounds) => LinearGradient(
             colors: isPremium
@@ -1791,22 +1903,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ).createShader(bounds),
-          child: Icon(icon, color: Colors.white, size: 38),
+          child: Icon(icon, color: Colors.white, size: 46),
         ),
         title: Text(title,
             style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: 18,
+                fontSize: 20,
                 letterSpacing: 0.5)),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 5),
           child: Text(sub,
               style: const TextStyle(
-                  color: Colors.white70, fontSize: 14, height: 1.3)),
+                  color: Colors.white70, fontSize: 15, height: 1.4)),
         ),
         trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: Colors.greenAccent.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(12),
@@ -1817,10 +1929,143 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               style: const TextStyle(
                   color: Colors.greenAccent,
                   fontWeight: FontWeight.w900,
-                  fontSize: 17)),
+                  fontSize: 20)),
         ),
         onTap: action,
       ),
+    );
+  }
+
+  Widget _buildUpcomingRewardItem({
+    required dynamic icon,
+    required String title,
+    required bool isReady,
+    required String readyText,
+    required String waitingText,
+    required VoidCallback onTap,
+  }) {
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    // Use FaIcon for FontAwesome icons and Icon for Material icons.
+    final Widget iconWidget = (icon.fontPackage == 'font_awesome_flutter')
+        ? FaIcon(icon, color: isReady ? Colors.amber : Colors.grey, size: 20)
+        : Icon(icon, color: isReady ? Colors.amber : Colors.grey, size: 24);
+    return GestureDetector(
+      onTap: isReady ? onTap : null,
+      child: Container(
+        width: 130,
+        margin: const EdgeInsets.symmetric(horizontal: 5),
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: themeProvider.isDarkMode
+              ? Colors.white.withValues(alpha: 0.05)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(
+            color: isReady
+                ? Colors.amber.withValues(alpha: 0.4)
+                : Colors.transparent,
+            width: 1,
+          ),
+          boxShadow: themeProvider.isDarkMode
+              ? []
+              : [
+                  const BoxShadow(
+                      color: Colors.black12,
+                      blurRadius: 4,
+                      offset: Offset(0, 2))
+                ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            iconWidget,
+            const SizedBox(height: 4),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: themeProvider.isDarkMode
+                    ? Colors.white
+                    : Colors.black87,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              isReady ? readyText : waitingText,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isReady
+                    ? Colors.greenAccent
+                    : (themeProvider.isDarkMode
+                        ? Colors.white54
+                        : Colors.black54),
+                fontSize: 10,
+                height: 1.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUpcomingRewards() {
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 2.0),
+          child: Text(
+            "الفرص القادمة", // Upcoming Opportunities
+            style: TextStyle(
+              color: themeProvider.isDarkMode ? Colors.white : Colors.black87,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 90,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 15),
+            children: [
+              _buildUpcomingRewardItem(
+                icon: Icons.card_giftcard_rounded,
+                title: tr('daily_reward'),
+                isReady: _canClaimDaily,
+                readyText: tr('reward_available'),
+                waitingText: "مُطالب به اليوم", // "Claimed today"
+                onTap: _claimDailyReward,
+              ),
+              _buildUpcomingRewardItem(
+                icon: FontAwesomeIcons.gamepad,
+                title: tr('unity_payout'), // Server 1
+                isReady: _unitySecondsLeft <= 0,
+                readyText: "جاهز للمشاهدة", // "Ready to watch"
+                waitingText: "${tr('wait')} ${_formatTime(_unitySecondsLeft)}",
+                onTap: () => _tabController.animateTo(0),
+              ),
+              _buildUpcomingRewardItem(
+                icon: FontAwesomeIcons.google,
+                title: tr('admob_payout'), // Server 2
+                isReady: _admobSecondsLeft <= 0,
+                readyText: "جاهز للمشاهدة", // "Ready to watch"
+                waitingText: "${tr('wait')} ${_formatTime(_admobSecondsLeft)}",
+                onTap: () => _tabController.animateTo(0),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 5),
+      ],
     );
   }
 
@@ -1829,6 +2074,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _banListener?.cancel();
     _unityTimer?.cancel();
     _admobTimer?.cancel();
+    _arcadeTimer?.cancel();
+    _arcadePageController.dispose();
     _controller.dispose();
     _tabController.dispose();
     super.dispose();
@@ -1941,6 +2188,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       children: [
                         _buildHeader(uid, currentExchangeRate),
                         _buildPointsDisplay(uid, currentExchangeRate),
+                        _buildUpcomingRewards(),
                         TabBar(
                           controller: _tabController,
                           indicatorColor: indicatorColor,
@@ -1961,7 +2209,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             children: [
                               SingleChildScrollView(
                                 padding: const EdgeInsets.symmetric(
-                                    vertical: 20, horizontal: 15),
+                                    vertical: 10, horizontal: 15),
                                 child: _buildVideoTab(
                                     unityRemaining,
                                     admobRemaining,
@@ -1982,6 +2230,46 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           },
         );
       },
+    );
+  }
+}
+
+// ✅ ودجت منفصلة وخفيفة لتدوير الأيقونة بشكل لا نهائي
+class SpinningWheelIcon extends StatefulWidget {
+  const SpinningWheelIcon({super.key});
+
+  @override
+  State<SpinningWheelIcon> createState() => _SpinningWheelIconState();
+}
+
+class _SpinningWheelIconState extends State<SpinningWheelIcon>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4), // 👈 يمكنك تغيير الرقم لتسريع أو إبطاء الدوران
+    )..repeat(); // 👈 أمر بالدوران المستمر
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: const FaIcon(
+        FontAwesomeIcons.dharmachakra,
+        color: Colors.purpleAccent,
+        size: 26,
+      ),
     );
   }
 }

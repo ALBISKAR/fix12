@@ -5,13 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:syria_earn_pro/services/ad_manager.dart';
 import 'package:syria_earn_pro/utils/security_utils.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:syria_earn_pro/widgets/global_bottom_ad.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -23,7 +22,6 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _isAccepted = false;
-  BannerAd? _loginBanner;
   final TextEditingController _referralController = TextEditingController();
   final GoogleSignIn _googleSignIn = GoogleSignIn.standard(
     scopes: <String>[
@@ -43,7 +41,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _referralController.dispose();
-    _loginBanner?.dispose();
     super.dispose();
   }
 
@@ -421,12 +418,8 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
-          // ✅ تغليف البانر الذكي السفلية بـ SizedBox ثابت لتجنب مشاكل القيود غير المحددة
-          if (FirebaseAuth.instance.currentUser?.uid != _adminUid)
-            SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: AdManager.smartBanner(_loginBanner)),
+          // ✅ عرض البانر السفلي
+          const GlobalBottomAd(),
         ],
       ),
     );
