@@ -15,7 +15,7 @@ class _DeviceRequestsScreenState extends State<DeviceRequestsScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF1A1A2E),
       appBar: AppBar(
-        title: const Text("طلبات إعادة الضبط").tr(),
+        title: Text(tr('device_requests_title')),
         backgroundColor: Colors.amber,
         foregroundColor: Colors.black,
       ),
@@ -31,9 +31,9 @@ class _DeviceRequestsScreenState extends State<DeviceRequestsScreen> {
           }
 
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
-                child: Text("لا توجد طلبات حالياً",
-                    style: TextStyle(color: Colors.white70)));
+            return Center(
+                child: Text(tr('no_requests'),
+                    style: const TextStyle(color: Colors.white70)));
           }
 
           var docs = snapshot.data!.docs;
@@ -51,13 +51,13 @@ class _DeviceRequestsScreenState extends State<DeviceRequestsScreen> {
                     borderRadius: BorderRadius.circular(12)),
                 child: ListTile(
                   contentPadding: const EdgeInsets.all(15),
-                  title: Text(data['email'] ?? "بدون إيميل",
+                  title: Text(data['email'] ?? tr('no_email'),
                       style: const TextStyle(
                           color: Colors.white, fontWeight: FontWeight.bold)),
                   subtitle: Padding(
                     padding: const EdgeInsets.all(8.0), // ✅ صحيح
                     child: Text(
-                        "ID الجديد: ${data['device_id'] ?? 'غير معروف'}",
+                        "${tr('new_id')}: ${data['device_id'] ?? tr('unknown')}",
                         style: const TextStyle(
                             color: Colors.white54, fontSize: 12)),
                   ),
@@ -70,7 +70,7 @@ class _DeviceRequestsScreenState extends State<DeviceRequestsScreen> {
                     ),
                     onPressed: () => _approveRequest(
                         context, data['email'], data['device_id'], docId),
-                    child: const Text("قبول").tr(),
+                    child: Text(tr('approve')),
                   ),
                 ),
               );
@@ -116,14 +116,14 @@ class _DeviceRequestsScreenState extends State<DeviceRequestsScreen> {
         // 🛡️ حارس أمني لضمان أن الشاشة لا تزال مفتوحة قبل استخدام context
         if (!context.mounted) return;
 
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("تم تفعيل الجهاز بنجاح وفك الحظر ✅"),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('device_approved_success')),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
         ));
       } else {
         // إذا لم يتم العثور على مستخدم بهذا الإيميل
-        throw "عذراً، لم يتم العثور على حساب مرتب بهذا البريد الإلكتروني.";
+        throw tr('account_not_found_email');
       }
     } catch (e) {
       debugPrint("خطأ أثناء معالجة الطلب: $e");
@@ -131,7 +131,7 @@ class _DeviceRequestsScreenState extends State<DeviceRequestsScreen> {
       if (!context.mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text("خطأ: ${e.toString()} ❌"),
+          content: Text("${tr('error_occurred')}: ${e.toString()} ❌"),
           backgroundColor: Colors.redAccent,
           behavior: SnackBarBehavior.floating));
     }

@@ -8,7 +8,6 @@ import 'package:provider/provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:flutter/foundation.dart';
-import 'package:startapp_sdk/startapp.dart';
 import 'firebase_options.dart';
 // ✅ استيراد حزمة السيرفر الجديد لإعلانات Start.io
 
@@ -33,9 +32,6 @@ const String adminUidConst = 'OeEwi4nMZrPjRLRiqWf1373btQT2';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // 🚀 تهيئة Start.io مبكراً جداً في دورة حياة التطبيق لمنع أي تأخير أو Timeout عند طلب الإعلانات
-  StartAppSdk();
 
   // 1. تهيئة الفايربيس واللغات أولاً لضمان تحميل الداتا
   await Firebase.initializeApp(

@@ -148,10 +148,6 @@ class SecurityUtils {
             if (savedDeviceId != null &&
                 savedDeviceId.isNotEmpty &&
                 savedDeviceId != secureId) {
-              await userDocRef.update({
-                'isBanned': true,
-                'ban_reason': 'Multi-account violation. Device mismatch.',
-              });
               if (context.mounted) _showDeviceLockedDialog(context);
               return false;
             }
@@ -220,16 +216,6 @@ class SecurityUtils {
         androidInfo.board.toLowerCase().contains('x86') ||
         androidInfo.hardware.toLowerCase().contains('x86');
     if (isX86) return true;
-
-    try {
-      final glInfo = await Process.run('getprop', ['ro.hardware.egl']);
-      String glStr = glInfo.stdout.toString().toLowerCase().trim();
-      if (glStr.contains('emulation') ||
-          glStr.contains('swiftshader') ||
-          glStr.contains('angle')) {
-        return true;
-      }
-    } catch (_) {}
 
     String fp = androidInfo.fingerprint.toLowerCase();
     String hw = androidInfo.hardware.toLowerCase();
@@ -453,11 +439,8 @@ class SecurityUtils {
       if (doc.exists) {
         int count = (doc.data()?['violation_count'] ?? 0).toInt();
         if (count >= 3) {
-          await userRef.update({
-            'isBanned': true,
-            'ban_reason':
-                'Automated ban: Multiple security violations ($count).',
-          });
+          // لا يمكن للعميل تعديل حقل isBanned بسبب قواعد الحماية، 
+          // لذلك نكتفي بطرده محلياً، وتسجيل التقرير في security_reports للأدمن.
 
           // طرد المستخدم فوراً بعد الحظر
           await _forceSignOut();

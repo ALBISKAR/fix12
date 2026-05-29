@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:provider/provider.dart';
 import 'package:syria_earn_pro/providers/theme_provider.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -129,6 +128,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this); // تفعيل مراقب حالة التطبيق
+    
+    _tabController = TabController(length: 3, vsync: this); // تهيئة متحكم التبويبات
+
+    // تهيئة متحكم الأنيميشن
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    )..forward();
+    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
 
     _arcadePageController = PageController(initialPage: 0);
     _arcadeTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
@@ -168,42 +176,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) _syncCooldownFromFirebase(user.uid);
       });
-
-      // 🌐 السيرفر 1 (Start.io): تأجيل تهيئة وتحميل أول فيديو لمدة (ثانية واحدة)
-      Future.delayed(const Duration(seconds: 1), () {
-        if (mounted) {
-          AdManager.initialize(); // تهيئة المحركات الشاملة (أدموب + Start.io)
-          AdManager.loadServer1Ad(); // بدء جلب كائن الفيديو لسيرفر 1
-          debugPrint("⚡ [سيرفر 1]: تم بدء التهيئة والتحميل بنجاح بعد ثانية.");
-        }
-      });
-
-      // 🔔 إعلان فتح التطبيق (App Open): تأجيل العرض حتى تستقر الشاشة تماماً بعد (ثانيتين)
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          AdManager.showAppOpenAdOnce();
-          debugPrint(
-              "⚡ [إعلان الفتح]: تم بدء طلب إعلان فتح التطبيق بعد ثانيتين.");
-        }
-      });
     }
-
-    // 2️⃣ ثانياً: تهيئة الـ الانيميشن والـ Controllers الخاصة بالواجهة فوراً لمنع أي تجميد
-    _controller = AnimationController(
-      duration: const Duration(seconds: 2),
-      vsync: this,
-    );
-    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
-    _controller.forward();
-
-    _tabController = TabController(length: 3, vsync: this);
-    _tabController.addListener(() {
-      if (!_tabController.indexIsChanging && mounted) {
-        HapticFeedback.selectionClick();
-        AdManager.showSmartAd();
-      }
-    });
-
     // 3️⃣ ثالثاً: ترحيل الخدمات البعيدة والإشعارات لتعمل بعد رسم الشاشة كلياً (PostFrameCallback)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -692,10 +665,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           id: notification.hashCode,
           title: notification.title,
           body: notification.body,
-          notificationDetails: const NotificationDetails(
+          notificationDetails: NotificationDetails(
             android: AndroidNotificationDetails(
               'push_notifications_channel',
-              'إشعارات العروض الجديدة',
+              tr('new_offers_notifications'),
               importance: Importance.max,
               priority: Priority.high,
               color: Color(0xFF4527A0),
@@ -708,9 +681,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 
   Future<void> _sendTimeNotification(String messageKey) async {
-    const android = AndroidNotificationDetails(
+    final android = AndroidNotificationDetails(
       'reward_timer_id',
-      'تنبيهات الأرباح',
+      tr('profits_alerts'),
       importance: Importance.max,
       priority: Priority.high,
       color: Color(0xFF4527A0),
@@ -723,7 +696,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       id: notificationId,
       title: tr('notification_reward_title'),
       body: tr(messageKey),
-      notificationDetails: const NotificationDetails(android: android),
+      notificationDetails: NotificationDetails(android: android),
     );
   }
 
@@ -735,6 +708,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
   void _showErrorSnackBar(String message) {
     if (!mounted) return;
+    _audioPlayer.play(AssetSource('sounds/error.mp3')).catchError((_) {});
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         key: UniqueKey(),
@@ -1324,9 +1298,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                                                   fontWeight: FontWeight.w600,
                                                   fontFamily: 'sans-serif'),
                                               children: [
-                                                const TextSpan(
-                                                    text: "Player ",
-                                                    style: TextStyle(
+                                                TextSpan(
+                                                    text: "${tr('unknown_player')} ",
+                                                    style: const TextStyle(
                                                         color: Colors.white70)),
                                                 TextSpan(
                                                     text: "(+$earnedPoints) ",
@@ -1378,7 +1352,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
                                     finalName = userData?['username'] ??
                                         userData?['name'] ??
                                         userData?['email']?.split('@')[0] ??
-                                        "Player";
+                                            tr('unknown_player');
                                   }
 
                                   return Padding(

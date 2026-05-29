@@ -7,7 +7,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:syria_earn_pro/widgets/global_bottom_ad.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -26,6 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
     ],
   );
   final String _adminUid = 'OeEwi4nMZrPjRLRiqWf1373btQT2';
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
   void initState() {
@@ -38,6 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _referralController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -269,6 +271,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _showSnack(String message) {
     if (!mounted) return;
+    _audioPlayer.play(AssetSource('sounds/error.mp3')).catchError((_) {});
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(message),
         backgroundColor: Colors.redAccent,
@@ -386,8 +389,6 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
-          // ✅ عرض البانر السفلي
-          const GlobalBottomAd(),
         ],
       ),
     );

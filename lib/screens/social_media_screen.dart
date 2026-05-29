@@ -73,6 +73,7 @@ class _SocialMediaScreenState extends State<SocialMediaScreen> with SingleTicker
 
   void _showErrorSnackBar(String msg) {
     if (!mounted) return;
+    _audioPlayer.play(AssetSource('sounds/error.mp3')).catchError((_) {});
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 

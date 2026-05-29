@@ -18,6 +18,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
   final String _adminPin = "438093";
   final String _allowedUid = "OeEwi4nMZrPjRLRiqWf1373btQT2";
   String _searchQuery = "";
+  int _currentPage = 0;
+  List<DocumentSnapshot?> _pageHistory = [null];
+  final int _usersPerPage = 50;
 
   // --- دوال التحكم والأمن ---
   void _checkPin() {
@@ -271,7 +274,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 borderSide: BorderSide.none,
               ),
             ),
-            onChanged: (val) => setState(() => _searchQuery = val),
+            onChanged: (val) => setState(() {
+              _searchQuery = val;
+              _currentPage = 0;
+              _pageHistory = [null];
+            }),
           ),
         ),
         Expanded(
@@ -281,40 +288,85 @@ class _AdminDashboardState extends State<AdminDashboard> {
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
-              return ListView.builder(
-                itemCount: snapshot.data!.docs.length,
-                itemBuilder: (context, index) {
-                  var userDoc = snapshot.data!.docs[index];
-                  var userData = userDoc.data() as Map<String, dynamic>;
-                  bool isBanned = userData['isBanned'] ?? false;
-                  return Card(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    child: ListTile(
-                      onTap: () => _showUserDetails(userDoc.id),
-                      title: Text(userData['name'] ?? "مستخدم",
-                          style: const TextStyle(color: Colors.white)),
-                      subtitle: Text("${userData['points'] ?? 0} نقطة"),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                              icon: const Icon(Icons.monetization_on,
-                                  color: Colors.greenAccent),
-                              onPressed: () => _editUserPointsDialog(
-                                  userDoc.id,
-                                  (userData['points'] ?? 0).toString(),
-                                  userData['name'] ?? "مستخدم")),
-                          IconButton(
-                              icon: Icon(
-                                  isBanned ? Icons.lock_open : Icons.block,
-                                  color: isBanned ? Colors.green : Colors.red),
-                              onPressed: () => _toggleBan(userDoc.id, isBanned,
-                                  userData['name'] ?? "مستخدم")),
-                        ],
-                      ),
+              var docs = snapshot.data!.docs;
+              bool hasNext = docs.length == _usersPerPage;
+              DocumentSnapshot? lastDoc = docs.isNotEmpty ? docs.last : null;
+
+              return Column(
+                children: [
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: docs.length,
+                      itemBuilder: (context, index) {
+                        var userDoc = docs[index];
+                        var userData = userDoc.data() as Map<String, dynamic>;
+                        bool isBanned = userData['isBanned'] ?? false;
+                        return Card(
+                          color: Colors.white.withValues(alpha: 0.05),
+                          child: ListTile(
+                            onTap: () => _showUserDetails(userDoc.id),
+                            title: Text(userData['name'] ?? "مستخدم",
+                                style: const TextStyle(color: Colors.white)),
+                            subtitle: Text("${userData['points'] ?? 0} نقطة"),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                    icon: const Icon(Icons.monetization_on,
+                                        color: Colors.greenAccent),
+                                    onPressed: () => _editUserPointsDialog(
+                                        userDoc.id,
+                                        (userData['points'] ?? 0).toString(),
+                                        userData['name'] ?? "مستخدم")),
+                                IconButton(
+                                    icon: Icon(
+                                        isBanned ? Icons.lock_open : Icons.block,
+                                        color: isBanned ? Colors.green : Colors.red),
+                                    onPressed: () => _toggleBan(userDoc.id, isBanned,
+                                        userData['name'] ?? "مستخدم")),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back_ios, size: 18),
+                          color: Colors.amber,
+                          disabledColor: Colors.white24,
+                          onPressed: _currentPage > 0 ? () {
+                            setState(() => _currentPage--);
+                          } : null,
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 15),
+                          child: Text("الصفحة ${_currentPage + 1}", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.arrow_forward_ios, size: 18),
+                          color: Colors.amber,
+                          disabledColor: Colors.white24,
+                          onPressed: hasNext ? () {
+                            setState(() {
+                              if (_pageHistory.length <= _currentPage + 1) {
+                                _pageHistory.add(lastDoc);
+                              } else {
+                                _pageHistory[_currentPage + 1] = lastDoc;
+                              }
+                              _currentPage++;
+                            });
+                          } : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               );
             },
           ),
@@ -621,15 +673,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
       String search = _searchQuery.trim();
       // تحديد نوع البحث بناءً على وجود علامة @ للإيميل
       if (search.contains('@')) {
-        return query.where('email', isEqualTo: search);
+        query = query.where('email', isEqualTo: search);
       } else {
-        return query
+        query = query
             .where('name', isGreaterThanOrEqualTo: search)
             .where('name', isLessThanOrEqualTo: '$search\uf8ff');
       }
+    } else {
+      query = query.orderBy('points', descending: true);
     }
-    // العرض الافتراضي: أعلى 100 مستخدم
-    return query.orderBy('points', descending: true).limit(100);
+    
+    query = query.limit(_usersPerPage);
+    if (_pageHistory.length > _currentPage && _pageHistory[_currentPage] != null) {
+      query = query.startAfterDocument(_pageHistory[_currentPage]!);
+    }
+    return query;
   }
 
   void _showUserDetails(String uid) {
@@ -670,22 +728,51 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         // Tab 1: كل بيانات المستخدم (مع إمكانية التعديل)
                         ListView(
                           padding: const EdgeInsets.all(15),
-                          children: userData.keys.map((key) {
-                            if (key == 'points_history') return const SizedBox();
-                            bool isComplex = userData[key] is List || userData[key] is Map;
-                            return Card(
-                              color: Colors.white.withValues(alpha: 0.05),
-                              margin: const EdgeInsets.only(bottom: 8),
-                              child: ListTile(
-                                title: Text(key, style: const TextStyle(color: Colors.amber, fontSize: 13)),
-                                subtitle: Text(userData[key].toString(), style: const TextStyle(color: Colors.white)),
-                                trailing: isComplex ? null : IconButton(
-                                  icon: const Icon(Icons.edit, color: Colors.blueAccent),
-                                  onPressed: () => _editUserFieldDialog(uid, key, userData[key]),
+                          children: [
+                            ...userData.keys.map((key) {
+                              if (key == 'points_history') return const SizedBox();
+                              
+                              var rawValue = userData[key];
+                              String displayValue = rawValue.toString();
+                              if (rawValue is Timestamp) {
+                                displayValue = DateFormat('yyyy/MM/dd - hh:mm a').format(rawValue.toDate());
+                              }
+
+                              bool isComplex = rawValue is List || rawValue is Map;
+                              return Card(
+                                color: Colors.white.withValues(alpha: 0.05),
+                                margin: const EdgeInsets.only(bottom: 8),
+                                child: ListTile(
+                                  title: Text(key, style: const TextStyle(color: Colors.amber, fontSize: 13)),
+                                  subtitle: Text(displayValue, style: const TextStyle(color: Colors.white)),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (!isComplex)
+                                        IconButton(
+                                          icon: const Icon(Icons.edit, color: Colors.blueAccent),
+                                          onPressed: () => _editUserFieldDialog(uid, key, rawValue),
+                                        ),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete, color: Colors.redAccent),
+                                        onPressed: () => _deleteUserField(uid, key),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            );
-                          }).toList(),
+                              );
+                            }),
+                            const SizedBox(height: 15),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.amber,
+                                  padding: const EdgeInsets.symmetric(vertical: 12)),
+                              icon: const Icon(Icons.add, color: Colors.black),
+                              label: const Text("إضافة حقل جديد",
+                                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                              onPressed: () => _addNewFieldDialog(uid),
+                            ),
+                          ],
                         ),
                         // Tab 2: سجل النقاط المطور (محمي ضد أخطاء التواريخ)
                         sortedHistory.isEmpty
@@ -730,7 +817,38 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  void _editUserFieldDialog(String uid, String key, dynamic currentValue) {
+  void _editUserFieldDialog(String uid, String key, dynamic currentValue) async {
+    if (currentValue is Timestamp) {
+      DateTime initialDate = currentValue.toDate();
+      DateTime? pickedDate = await showDatePicker(
+        context: context,
+        initialDate: initialDate,
+        firstDate: DateTime(2000),
+        lastDate: DateTime(2100),
+      );
+      if (pickedDate != null && mounted) {
+        TimeOfDay? pickedTime = await showTimePicker(
+          context: context,
+          initialTime: TimeOfDay.fromDateTime(initialDate),
+        );
+        if (pickedTime != null && mounted) {
+          DateTime finalDateTime = DateTime(
+            pickedDate.year, pickedDate.month, pickedDate.day,
+            pickedTime.hour, pickedTime.minute,
+          );
+          try {
+            await FirebaseFirestore.instance.collection('users').doc(uid).update({
+              key: Timestamp.fromDate(finalDateTime),
+            });
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("تم تعديل الوقت بنجاح ✅"), backgroundColor: Colors.green));
+          } catch (e) {
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("خطأ: $e"), backgroundColor: Colors.red));
+          }
+        }
+      }
+      return;
+    }
+
     TextEditingController editController = TextEditingController(text: currentValue.toString());
     showDialog(
       context: context,
@@ -766,6 +884,130 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         ],
       ),
+    );
+  }
+
+  void _deleteUserField(String uid, String key) async {
+    bool confirm = await showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+                  backgroundColor: const Color(0xFF1A1A2E),
+                  title: const Text("تأكيد الحذف", style: TextStyle(color: Colors.redAccent)),
+                  content: Text("هل أنت متأكد من حذف الحقل '$key'؟", style: const TextStyle(color: Colors.white70)),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text("إلغاء", style: TextStyle(color: Colors.grey))),
+                    ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text("حذف", style: TextStyle(color: Colors.white))),
+                  ],
+                )) ??
+        false;
+
+    if (confirm) {
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(uid).update({
+          key: FieldValue.delete(),
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text("تم حذف الحقل بنجاح ✅"), backgroundColor: Colors.green));
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("خطأ أثناء الحذف: $e"), backgroundColor: Colors.red));
+        }
+      }
+    }
+  }
+
+  void _addNewFieldDialog(String uid) {
+    TextEditingController keyController = TextEditingController();
+    TextEditingController valueController = TextEditingController();
+    String selectedType = 'String';
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (context, setState) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1A1A2E),
+            title: const Text("إضافة حقل جديد", style: TextStyle(color: Colors.amber)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                    controller: keyController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                        labelText: "اسم الحقل", labelStyle: TextStyle(color: Colors.white70))),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedType,
+                  dropdownColor: const Color(0xFF1A1A2E),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                      labelText: "نوع الحقل", labelStyle: TextStyle(color: Colors.white70)),
+                  items: ['String', 'Number', 'Boolean', 'Timestamp']
+                      .map((type) => DropdownMenuItem(value: type, child: Text(type)))
+                      .toList(),
+                  onChanged: (val) => setState(() => selectedType = val!),
+                ),
+                const SizedBox(height: 10),
+                if (selectedType != 'Timestamp')
+                  TextField(
+                      controller: valueController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                          labelText: "القيمة", labelStyle: TextStyle(color: Colors.white70))),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("إلغاء", style: TextStyle(color: Colors.grey))),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+                onPressed: () async {
+                  String key = keyController.text.trim();
+                  if (key.isEmpty) return;
+
+                  dynamic finalValue;
+                  if (selectedType == 'String') {
+                    finalValue = valueController.text;
+                  } else if (selectedType == 'Number') {
+                    finalValue = num.tryParse(valueController.text) ?? 0;
+                  } else if (selectedType == 'Boolean') {
+                    finalValue = valueController.text.toLowerCase() == 'true';
+                  } else if (selectedType == 'Timestamp') {
+                    finalValue = FieldValue.serverTimestamp();
+                  }
+
+                  try {
+                    await FirebaseFirestore.instance.collection('users').doc(uid).update({
+                      key: finalValue,
+                    });
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (mounted) {
+                      ScaffoldMessenger.of(this.context).showSnackBar(const SnackBar(
+                          content: Text("تمت الإضافة بنجاح ✅"), backgroundColor: Colors.green));
+                    }
+                  } catch (e) {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(content: Text("خطأ: $e"), backgroundColor: Colors.red));
+                    }
+                  }
+                },
+                child: const Text("إضافة", style: TextStyle(color: Colors.black)),
+              ),
+            ],
+          );
+        });
+      },
     );
   }
 

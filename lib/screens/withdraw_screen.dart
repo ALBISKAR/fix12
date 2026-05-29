@@ -10,6 +10,7 @@ import 'package:check_vpn_connection/check_vpn_connection.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:audioplayers/audioplayers.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -28,6 +29,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   String _selectedMethod = "USDT (TRC-20)";
   bool _isSending = false;
   final logger = Logger();
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   // الإبقاء على طرق السحب كما هي في طلبك
   final Map<String, Map<String, dynamic>> _methods = {
@@ -75,13 +77,21 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     },
   };
 
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
   void _showSuccessSnackBar(String msg) {
+    _audioPlayer.play(AssetSource('sounds/success.mp3')).catchError((_) {});
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: Colors.green),
     );
   }
 
   void _showErrorSnackBar(String msg) {
+    _audioPlayer.play(AssetSource('sounds/error.mp3')).catchError((_) {});
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: Colors.red),
     );

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:syria_earn_pro/utils/security_utils.dart';
 import 'package:syria_earn_pro/services/ad_manager.dart';
 import 'package:syria_earn_pro/screens/home_screen.dart';
@@ -25,6 +26,22 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
+    
+    // 🔇 إعداد مشغل الصوت العالمي ليحترم الوضع الصامت في الهاتف (iOS & Android)
+    AudioPlayer.global.setAudioContext(AudioContext(
+      iOS: AudioContextIOS(
+        category: AVAudioSessionCategory.ambient, // يحترم زر الصامت (Hardware Switch) في الآيفون
+        options: {},
+      ),
+      android: AudioContextAndroid(
+        isSpeakerphoneOn: false,
+        stayAwake: false,
+        contentType: AndroidContentType.sonification,
+        usageType: AndroidUsageType.assistanceSonification, // يربط الصوت بمستوى رنين الهاتف بدلاً من الوسائط
+        audioFocus: AndroidAudioFocus.none,
+      ),
+    ));
+
     // تأجيل تنفيذ العمليات حتى يتم رسم الواجهة أولاً لمنع تجمد التطبيق (ANR)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startAppInitialization();
@@ -64,8 +81,7 @@ class _SplashScreenState extends State<SplashScreen> {
     // تحميل الإعلانات (للمستخدم العادي فقط)
     if (user == null || user.uid != _adminUid) {
       debugPrint("📢 جاري تحميل الإعلانات...");
-      AdManager.loadAppOpenAd();
-      AdManager.loadAdMobInterstitial();
+      AdManager.initialize(); // ✅ تهيئة وتحميل كل الشبكات الإعلانية بشكل آمن وصحيح
     }
   }
 

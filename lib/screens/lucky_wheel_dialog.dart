@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_fortune_wheel/flutter_fortune_wheel.dart';
 import 'package:confetti/confetti.dart';
 import 'package:easy_localization/easy_localization.dart'; // 1. استيراد الحزمة
+import 'package:audioplayers/audioplayers.dart';
 
 class LuckyWheelDialog extends StatefulWidget {
   final Function(int) onRewardEarned;
@@ -17,12 +18,17 @@ class _LuckyWheelDialogState extends State<LuckyWheelDialog> with SingleTickerPr
   StreamController<int> selected = StreamController<int>();
   late ConfettiController _confettiController;
   bool _isSpinning = false;
+  final AudioPlayer _audioPlayer = AudioPlayer();
   late AnimationController _btnAnimController;
   late Animation<double> _btnScaleAnimation;
 
   @override
   void initState() {
     super.initState();
+    
+    // 👈 إجبار مشغل الصوت على تكرار المقطع (Loop) طوال فترة الدوران
+    _audioPlayer.setReleaseMode(ReleaseMode.loop);
+
     _confettiController =
         ConfettiController(duration: const Duration(seconds: 2));
 
@@ -41,6 +47,7 @@ class _LuckyWheelDialogState extends State<LuckyWheelDialog> with SingleTickerPr
     selected.close();
     _confettiController.dispose();
     _btnAnimController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -50,9 +57,9 @@ class _LuckyWheelDialogState extends State<LuckyWheelDialog> with SingleTickerPr
 
     if (value < 0.01) { // 1% chance for 9 or 10
       return random.nextInt(2) + 9; // Returns 9 or 10
-    } else if (value < 0.10) { // 9% chance for 5 to 8 (0.10 = 0.01 + 0.09)
+    } else if (value < 0.05) { // 4% chance for 5 to 8 (0.01 + 0.04 = 0.05)
       return random.nextInt(4) + 5; // Returns 5, 6, 7, or 8
-    } else { // 90% chance for 1 to 4
+    } else { // 95% chance for 1 to 4
       return random.nextInt(4) + 1; // Returns 1, 2, 3, or 4
     }
   }
@@ -95,21 +102,33 @@ class _LuckyWheelDialogState extends State<LuckyWheelDialog> with SingleTickerPr
               height: 260,
               child: FortuneWheel(
                 animateFirst: false, // 🛑 إيقاف الدوران التلقائي عند فتح النافذة
+                duration: const Duration(seconds: 9), // 👈 زيادة مدة الدوران إلى 9 ثواني لتشويق أكثر
                 selected: selected.stream,
                 items: [
                   for (int i = 1; i <= 10; i++)
                     FortuneItem(
+                      style: FortuneItemStyle(
+                        color: (i >= 9)
+                            ? Colors.amber // لون ذهبي للجوائز الكبرى
+                            : (i >= 5)
+                                ? Colors.deepPurple // لون بنفسجي للمتوسطة
+                                : (i % 2 == 0)
+                                    ? Colors.teal
+                                    : Colors.blueAccent, // ألوان متبادلة للعادية
+                        borderColor: Colors.black26,
+                        borderWidth: 2,
+                      ),
                       child: Text(
                         "$i",
                         style: TextStyle(
-                          fontSize: 22,
+                          fontSize: (i >= 9) ? 28 : 22, // 👈 تكبير حجم خط الجوائز الكبرى
                           fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: (i >= 9) ? Colors.black87 : Colors.white, // تباين النص مع الخلفية الذهبية
                           shadows: [
                             Shadow(
                               blurRadius: 3,
-                              color: Colors.black.withValues(alpha: 0.5),
-                              offset: Offset(1, 1),
+                              color: (i >= 9) ? Colors.white54 : Colors.black.withValues(alpha: 0.5),
+                              offset: const Offset(1, 1),
                             ),
                           ],
                         ),
@@ -159,6 +178,7 @@ class _LuckyWheelDialogState extends State<LuckyWheelDialog> with SingleTickerPr
                     if (_isSpinning) return;
                     _btnAnimController.stop(); // 🛑 إيقاف النبض فور النقر
                     setState(() => _isSpinning = true);
+                    _audioPlayer.play(AssetSource('sounds/spinning.mp3')).catchError((_) {});
                     int result = _calculateResult();
                     selected.add(result - 1);
 
@@ -166,9 +186,10 @@ class _LuckyWheelDialogState extends State<LuckyWheelDialog> with SingleTickerPr
                     ScaffoldMessenger.of(context);
                     final navigator = Navigator.of(context);
 
-                    Future.delayed(const Duration(seconds: 4), () {
+                    Future.delayed(const Duration(seconds: 8), () { // 👈 يجب أن يطابق مدة الدوران الجديدة
                       if (!mounted) return;
 
+                      _audioPlayer.stop(); // إيقاف صوت الدوران عند ظهور النتيجة
                       _confettiController.play();
                       widget.onRewardEarned(result);
 

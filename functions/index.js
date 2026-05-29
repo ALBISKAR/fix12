@@ -18,16 +18,16 @@ exports.spinLuckyWheel = onCall(async (request) => {
     const userId = request.auth.uid;
     const userRef = db.collection('users').doc(userId);
 
-    // 2. منطق الاحتمالات (60% قليل، 30% متوسط، 10% كبير)
+    // 2. منطق الاحتمالات (95% من 1 لـ 4، 4% من 5 لـ 8، 1% من 9 لـ 10)
     const random = Math.random();
     let points = 0;
     
-    if (random < 0.60) {
-        points = Math.floor(Math.random() * 3) + 1; // 1-3 نقاط
-    } else if (random < 0.90) {
-        points = Math.floor(Math.random() * 4) + 4; // 4-7 نقاط
+    if (random < 0.95) {
+        points = Math.floor(Math.random() * 4) + 1; // 1-4 نقاط (95%)
+    } else if (random < 0.99) {
+        points = Math.floor(Math.random() * 4) + 5; // 5-8 نقاط (4%)
     } else {
-        points = Math.floor(Math.random() * 3) + 8; // 8-10 نقاط
+        points = Math.floor(Math.random() * 2) + 9; // 9-10 نقاط (1%)
     }
 
     // 3. تحديث النقاط في Firestore عبر Transaction لضمان الأمان
@@ -393,25 +393,67 @@ exports.syncGlobalStats = onDocumentUpdated("users/{userId}", async (event) => {
     const newData = event.data.after.data();
     const prevData = event.data.before.data();
     
-    if (newData.points !== prevData.points) {
-        const diff = (newData.points || 0) - (prevData.points || 0);
+    // 1. 🛡️ نظام الحظر التلقائي الذكي
+    // إذا وصلت مخالفات المستخدم الأمنية إلى 3، يتم حظره نهائياً من السيرفر
+    const newViolations = newData.violation_count || 0;
+    const prevViolations = prevData.violation_count || 0;
+    
+    if (newViolations >= 3 && prevViolations < 3 && !newData.isBanned) {
+        await event.data.after.ref.update({
+            isBanned: true,
+            ban_reason: 'Automated ban: Multiple security violations (3+).'
+        });
+    }
+    
+    // 2. 📊 مزامنة النقاط وجدار الحماية المضاد للاختراق (Anti-Cheat)
+    const prevPoints = prevData.points || 0;
+    const newPoints = newData.points || 0;
+    const diff = newPoints - prevPoints;
         
-        if (diff > 0) {
-            const batch = db.batch();
-            const configRef = db.collection('app_settings').doc('config');
-            batch.set(configRef, {
-                total_points_distributed: admin.firestore.FieldValue.increment(diff),
-                daily_points: admin.firestore.FieldValue.increment(diff),
-                weekly_points: admin.firestore.FieldValue.increment(diff)
-            }, { merge: true });
-
-            const userRef = db.collection('users').doc(event.params.userId);
-            batch.update(userRef, {
-                weekly_points: admin.firestore.FieldValue.increment(diff)
-            });
-
-            await batch.commit();
+    if (diff > 0) {
+        const prevHistoryLen = (prevData.points_history || []).length;
+        const newHistoryLen = (newData.points_history || []).length;
+        
+        // 🛡️ فحص حرج: إذا زادت النقاط ولم يزداد سجل المهام، فهذه محاولة اختراق لتخطي السجل!
+        if (newHistoryLen <= prevHistoryLen) {
+            // الحد الأقصى للنقاط المسموح للعميل بإرسالها في الطلب الواحد هو 100 نقطة حسب Rules
+            if (diff <= 100) {
+                console.warn(`[Anti-Cheat] تم اكتشاف تلاعب بالرصيد للمستخدم ${event.params.userId}. جاري التراجع.`);
+                // التراجع عن النقاط المسروقة وتسجيل مخالفة
+                await event.data.after.ref.update({
+                    points: prevPoints,
+                    violation_count: admin.firestore.FieldValue.increment(1)
+                });
+                
+                // إنشاء تقرير أمني للأدمن
+                await db.collection('security_reports').add({
+                    uid: event.params.userId,
+                    reason: 'Anti-Cheat: ArrayUnion bypass detected (Points increased without history log).',
+                    timestamp: admin.firestore.FieldValue.serverTimestamp()
+                });
+                return; // إيقاف إكمال العملية
+            } else {
+                // إذا كانت الزيادة أكبر من 100 فهذا مستحيل من العميل (يتم صده من Rules).
+                // هذا يعني أن الأدمن هو من أضاف النقاط يدوياً من لوحة التحكم، فندعه يمر بأمان.
+                console.log(`[Admin Edit] إضافة رصيد إداري (${diff}) للمستخدم ${event.params.userId}.`);
+            }
         }
+        
+        // تحديث إحصائيات السيرفر بشكل طبيعي
+        const batch = db.batch();
+        const configRef = db.collection('app_settings').doc('config');
+        batch.set(configRef, {
+            total_points_distributed: admin.firestore.FieldValue.increment(diff),
+            daily_points: admin.firestore.FieldValue.increment(diff),
+            weekly_points: admin.firestore.FieldValue.increment(diff)
+        }, { merge: true });
+
+        const userRef = db.collection('users').doc(event.params.userId);
+        batch.update(userRef, {
+            weekly_points: admin.firestore.FieldValue.increment(diff)
+        });
+
+        await batch.commit();
     }
 });
 
