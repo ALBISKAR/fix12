@@ -23,6 +23,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:confetti/confetti.dart';
+import 'package:ntp/ntp.dart'; // إضافة حزمة وقت الإنترنت
 import 'package:firebase_messaging/firebase_messaging.dart';
 // ✅ استيراد ملف خدمة Start.io (سيرفر 1) الجديد
 
@@ -412,12 +413,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   // ✅ إصلاح دالة الـ Cooldown المركزية: أصبحت تُستدعى فقط عند التحقق الفعلي والناجح للمكافآت
   void _startCooldownWithFirebase(
       String server, String uid, int duration) async {
-    DateTime endTime = DateTime.now().add(Duration(seconds: duration));
+    DateTime networkTime = await NTP.now(); // جلب الوقت الحقيقي من الإنترنت
+    DateTime endTime = networkTime.add(Duration(seconds: duration));
 
     await FirebaseFirestore.instance.collection('users').doc(uid).set({
       '${server}_cooldown_until': Timestamp.fromDate(endTime),
-      'login_lock_until':
-          Timestamp.fromDate(DateTime.now().add(const Duration(hours: 1))),
     }, SetOptions(merge: true));
 
     // تشغيل التايمر المحلي فوراً لتحديث الواجهة بصرياً أمام المستخدم
@@ -437,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         if (data.containsKey(key) && data[key] != null) {
           Timestamp timestamp = data[key];
           DateTime endTime = timestamp.toDate();
-          DateTime now = DateTime.now(); // ستتم المقارنة وتحديث التايمر المستقل
+          DateTime now = await NTP.now(); // جلب الوقت الحقيقي من الإنترنت للمقارنة
 
           if (endTime.isAfter(now)) {
             int remaining = endTime.difference(now).inSeconds;
@@ -548,20 +548,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
     // إذا كنت أدمن، أو كان الوقت قد انتهى، سيستمر الكود إلى هنا:
 
+    bool isRewarding = false;
     Future<void> onLuckyWheelReward(int points) async {
+      if (isRewarding) return;
+      isRewarding = true;
       final uid = FirebaseAuth.instance.currentUser!.uid;
+      int safePoints = points.clamp(1, 10); // سد ثغرة تعديل الحزم لإرسال نقاط وهمية (يسمح فقط بـ 1 إلى 10)
+      DateTime networkTime = await NTP.now();
       try {
         WriteBatch batch = FirebaseFirestore.instance.batch();
 
         DocumentReference userRef = FirebaseFirestore.instance.collection('users').doc(uid);
         batch.update(userRef, {
-          'points': FieldValue.increment(points),
+          'points': FieldValue.increment(safePoints),
           'points_history': FieldValue.arrayUnion([
             {
-              'taskId': 'lucky_wheel_${DateTime.now().millisecondsSinceEpoch}',
-              'amount': points,
+              'taskId': 'lucky_wheel_${networkTime.millisecondsSinceEpoch}',
+              'amount': safePoints,
               'type': 'lucky_wheel_reward',
-              'timestamp': DateTime.now().toIso8601String(),
+              'timestamp': networkTime.toIso8601String(),
             }
           ]),
         });
@@ -570,7 +575,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         batch.set(taskRef, {
           'userId': uid,
           'taskType': 'lucky_wheel_reward',
-          'rewardAmount': points,
+          'rewardAmount': safePoints,
           'status': 'verified',
           'timestamp': FieldValue.serverTimestamp(),
         });
@@ -581,7 +586,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           _confettiController.play();
           _startCooldownWithFirebase(server, uid, cooldown);
           _audioPlayer.play(AssetSource('sounds/success.mp3')).catchError((_) {});
-          _showSuccessSnackBar(tr('you_won_points', args: [points.toString()]));
+          _showSuccessSnackBar(tr('you_won_points', args: [safePoints.toString()]));
         }
       } catch (e) {
         if (mounted) {
@@ -712,7 +717,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       icon: '@mipmap/ic_launcher',
     );
 
-    int notificationId = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    int notificationId = (await NTP.now()).millisecondsSinceEpoch ~/ 1000;
 
     await flutterLocalNotificationsPlugin.show(
       id: notificationId,
@@ -747,7 +752,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   Future<void> _checkDailyRewardStatus(String uid) async {
     try {
       // 🚀 استخدام توقيت UTC ليتطابق تماماً مع سيرفر فايربيس ويمنع أخطاء المنطقة الزمنية
-      DateTime now = DateTime.now().toUtc();
+      DateTime now = (await NTP.now()).toUtc(); // استخدام وقت الشبكة المشفر
       String todayStr = "${now.year}-${now.month}-${now.day}";
 
       final userDocRef =
@@ -778,12 +783,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
   }
 
   // ✅ 2. المطالبة بالمكافأة مباشرة من Cloud Function لتجنب PERMISSION_DENIED
+  bool _isClaimingDaily = false;
   Future<void> _claimDailyReward() async {
+    if (_isClaimingDaily) return;
+    _isClaimingDaily = true;
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      _isClaimingDaily = false;
+      return;
+    }
 
     if (!_canClaimDaily) {
-      DateTime now = DateTime.now().toUtc();
+      _isClaimingDaily = false;
+      DateTime now = (await NTP.now()).toUtc();
       DateTime nextMidnight = DateTime.utc(now.year, now.month, now.day + 1);
       Duration remaining = nextMidnight.difference(now);
       String formattedTime = "${remaining.inHours.toString().padLeft(2, '0')}:${(remaining.inMinutes % 60).toString().padLeft(2, '0')}:${(remaining.inSeconds % 60).toString().padLeft(2, '0')}";
@@ -826,6 +838,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       }
 
       if (response.statusCode == 200) {
+        _isClaimingDaily = false;
         final Map<String, dynamic> data =
             jsonDecode(response.body) as Map<String, dynamic>;
         final int reward = (data['rewardAmount'] ?? 10).toInt();
@@ -837,8 +850,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       }
 
       if (response.statusCode == 409) {
+        _isClaimingDaily = false;
         await _checkDailyRewardStatus(user.uid);
-        DateTime now = DateTime.now().toUtc();
+        DateTime now = (await NTP.now()).toUtc();
         DateTime nextMidnight = DateTime.utc(now.year, now.month, now.day + 1);
         Duration remaining = nextMidnight.difference(now);
         String formattedTime = "${remaining.inHours.toString().padLeft(2, '0')}:${(remaining.inMinutes % 60).toString().padLeft(2, '0')}:${(remaining.inSeconds % 60).toString().padLeft(2, '0')}";
@@ -847,6 +861,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
       }
 
       if (response.statusCode == 401) {
+        _isClaimingDaily = false;
         debugPrint("❌ مكافأة يومية - غير مصرح: ${response.body}");
         _showErrorSnackBar(tr('error_occurred'));
         return;
@@ -854,10 +869,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
 
       debugPrint(
           "❌ فشل استلام المكافأة! الكود: ${response.statusCode} | التفاصيل: ${response.body}");
+      _isClaimingDaily = false;
       _showErrorSnackBar(
           "${tr('error_occurred')} (Code: ${response.statusCode})");
       if (mounted) setState(() => _canClaimDaily = true);
     } catch (e) {
+      _isClaimingDaily = false;
       debugPrint("❌ استثناء في المكافأة اليومية: $e");
       if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
         Navigator.of(context, rootNavigator: true).pop();
@@ -1795,7 +1812,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
         Navigator.pop(dialogContext);
       }
 
+      // تحقق حاسم من السيرفر: منع استغلال الدالة لأكثر من مرة عبر الهندسة العكسية
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>? ?? {};
+      if (userData['has_rated_app'] == true) return;
+
       // 2. نقوم بتحديث البيانات سحابياً في الخلفية بأمان
+      DateTime networkTime = await NTP.now();
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
         'has_rated_app': true,
         'points': FieldValue.increment(25),
@@ -1803,7 +1826,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, 
           {
             'type': 'rate_app_bonus',
             'amount': 25,
-            'timestamp': DateTime.now().toIso8601String(),
+            'timestamp': networkTime.toIso8601String(),
           }
         ])
       });

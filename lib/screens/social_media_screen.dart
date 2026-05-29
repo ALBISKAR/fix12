@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:syria_earn_pro/services/ad_manager.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:confetti/confetti.dart';
+import 'package:ntp/ntp.dart';
 
 class SocialMediaScreen extends StatefulWidget {
   final int initialTabIndex;
@@ -19,7 +20,7 @@ class SocialMediaScreen extends StatefulWidget {
 class _SocialMediaScreenState extends State<SocialMediaScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
 
-  DateTime? _socialTaskStartTime;
+  Stopwatch? _socialTaskStopwatch; // استخدام Stopwatch لأنه لا يتأثر بتغيير وقت الهاتف
   bool _isWaitingForSocialTask = false;
   int _pendingSocialPoints = 0;
   int _pendingSocialSeconds = 30;
@@ -52,15 +53,15 @@ class _SocialMediaScreenState extends State<SocialMediaScreen> with SingleTicker
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
-      if (_isWaitingForSocialTask && _socialTaskStartTime != null) {
+      if (_isWaitingForSocialTask && _socialTaskStopwatch != null) {
         _isWaitingForSocialTask = false;
-        final int timeSpentOutside = DateTime.now().difference(_socialTaskStartTime!).inSeconds;
+        final int timeSpentOutside = _socialTaskStopwatch!.elapsed.inSeconds; // حساب الوقت الفعلي
+        _socialTaskStopwatch!.stop();
         if (timeSpentOutside >= _pendingSocialSeconds) {
           _finalizeSocialPoints(_pendingSocialPoints, _pendingSocialCampaignId, _pendingSocialType);
         } else {
           _showErrorSnackBar(tr('not_enough_time_social', args: [_pendingSocialSeconds.toString()]));
         }
-        _socialTaskStartTime = null;
       }
     }
   }
@@ -75,7 +76,12 @@ class _SocialMediaScreenState extends State<SocialMediaScreen> with SingleTicker
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
+  bool _isOpeningLink = false;
+  bool _isProcessingReward = false; // حارس أمني لمنع النقر المتكرر أثناء إضافة المكافأة
+
   void _openSocialLink(String url, int points, String campaignId, String type, int requiredSeconds) async {
+    if (_isOpeningLink || _isProcessingReward) return;
+    _isOpeningLink = true;
     final Uri uri = Uri.parse(url);
     try {
       if (await canLaunchUrl(uri)) {
@@ -84,7 +90,7 @@ class _SocialMediaScreenState extends State<SocialMediaScreen> with SingleTicker
         _pendingSocialCampaignId = campaignId;
         _pendingSocialType = type;
         _isWaitingForSocialTask = true;
-        _socialTaskStartTime = DateTime.now();
+        _socialTaskStopwatch = Stopwatch()..start(); // بدء المؤقت الآمن الذي لا يمكن اختراقه
 
         if (mounted) {
           _showSuccessSnackBar(tr('redirecting_wait', args: [requiredSeconds.toString()]));
@@ -96,25 +102,46 @@ class _SocialMediaScreenState extends State<SocialMediaScreen> with SingleTicker
     } catch (e) {
       _isWaitingForSocialTask = false;
       if (mounted) _showErrorSnackBar(tr('error_occurred'));
+    } finally {
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) setState(() { _isOpeningLink = false; });
+      });
     }
   }
 
   void _finalizeSocialPoints(int points, String campaignId, String type) async {
+    if (_isProcessingReward) return; // حماية ضد الدخول المزدوج
+    _isProcessingReward = true;
+
     String uid = FirebaseAuth.instance.currentUser?.uid ?? "";
-    if (uid.isEmpty) return;
+    if (uid.isEmpty) {
+      _isProcessingReward = false;
+      return;
+    }
 
     try {
+      // التحقق الصارم من قاعدة البيانات لمنع إرسال طلبات مزيفة للمهام المنجزة مسبقاً
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>? ?? {};
+      List<dynamic> claimed = userData['claimed_campaigns'] ?? [];
+      if (claimed.contains(campaignId)) {
+        _isProcessingReward = false;
+        return;
+      }
+
+      int safePoints = points.clamp(1, 100); // منع إرسال نقاط تفوق الحد المسموح
+      DateTime networkTime = await NTP.now(); // التوقيت الآمن
       WriteBatch batch = FirebaseFirestore.instance.batch();
 
       DocumentReference userRef = FirebaseFirestore.instance.collection('users').doc(uid);
       batch.update(userRef, {
-        'points': FieldValue.increment(points),
+        'points': FieldValue.increment(safePoints),
         'claimed_campaigns': FieldValue.arrayUnion([campaignId]),
         'points_history': FieldValue.arrayUnion([
           {
             'type': type,
-            'amount': points,
-            'timestamp': DateTime.now().toIso8601String(),
+            'amount': safePoints,
+            'timestamp': networkTime.toIso8601String(),
           }
         ])
       });
@@ -132,6 +159,15 @@ class _SocialMediaScreenState extends State<SocialMediaScreen> with SingleTicker
       }
     } catch (e) {
       if (mounted) _showErrorSnackBar(tr('error_occurred'));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessingReward = false; // إنهاء عملية الإضافة وفتح المجال للمهام الأخرى
+        });
+      }
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) setState(() { _isOpeningLink = false; });
+      });
     }
   }
 
@@ -341,6 +377,9 @@ class _SocialMediaScreenState extends State<SocialMediaScreen> with SingleTicker
               iconData,
               iconColor,
               () {
+                // حماية النقر المتكرر السريع على زر تنفيذ المهمة
+                if (_isOpeningLink || _isProcessingReward) return;
+                
                 AdManager.showSmartAd();
                 if (isExhausted) {
                   _showErrorSnackBar(isExpired ? tr('task_time_ended') : tr('task_limit_reached'));

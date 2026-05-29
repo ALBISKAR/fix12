@@ -156,6 +156,7 @@ class _LuckyWheelDialogState extends State<LuckyWheelDialog> with SingleTickerPr
             onPressed: _isSpinning
                 ? null
                 : () {
+                    if (_isSpinning) return;
                     _btnAnimController.stop(); // 🛑 إيقاف النبض فور النقر
                     setState(() => _isSpinning = true);
                     int result = _calculateResult();

@@ -111,7 +111,7 @@ class _SplashScreenState extends State<SplashScreen> {
             (!data.containsKey('points') ||
                 !data.containsKey('streak_count'))) {
           await docRef.set({
-            'points': data['points'] ?? 100,
+            'points': data['points'] ?? 0, // تم التصفير لمنع استغلال ثغرة استعادة النقاط الافتراضية
             'streak_count': data['streak_count'] ?? 0,
           }, SetOptions(merge: true));
         }

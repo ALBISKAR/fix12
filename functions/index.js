@@ -32,8 +32,19 @@ exports.spinLuckyWheel = onCall(async (request) => {
 
     // 3. تحديث النقاط في Firestore عبر Transaction لضمان الأمان
     await db.runTransaction(async (t) => {
+        const userDoc = await t.get(userRef);
+        if (!userDoc.exists) throw new Error("User Not Found");
+        const userData = userDoc.data();
+        
+        // حماية متقدمة: منع استدعاء عجلة الحظ أكثر من مرة كل دقيقتين لمنع ثغرات السبام
+        const lastSpin = userData.last_spin_time ? (userData.last_spin_time.toDate ? userData.last_spin_time.toDate() : new Date(0)) : new Date(0);
+        if (Date.now() - lastSpin.getTime() < 2 * 60 * 1000) {
+            throw new Error("يرجى الانتظار قبل المحاولة مرة أخرى");
+        }
+
         t.update(userRef, {
             points: admin.firestore.FieldValue.increment(points),
+            last_spin_time: admin.firestore.FieldValue.serverTimestamp(),
             points_history: admin.firestore.FieldValue.arrayUnion({
                 taskId: `lucky_wheel_${Date.now()}`,
                 amount: points,
