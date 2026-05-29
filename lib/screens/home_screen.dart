@@ -10,6 +10,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:syria_earn_pro/screens/history_screen.dart';
 import 'package:syria_earn_pro/screens/lucky_wheel_dialog.dart';
 import 'package:syria_earn_pro/screens/offers_tab_screen.dart';
+import 'package:syria_earn_pro/screens/social_media_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:syria_earn_pro/services/ad_manager.dart';
 import 'package:syria_earn_pro/screens/withdraw_screen.dart';
@@ -20,6 +21,9 @@ import 'package:check_vpn_connection/check_vpn_connection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:http/http.dart' as http;
+import 'package:audioplayers/audioplayers.dart';
+import 'package:confetti/confetti.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 // ✅ استيراد ملف خدمة Start.io (سيرفر 1) الجديد
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -32,7 +36,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   bool _isWaiting = false;
   bool _isAdProcessing = false;
   late TabController _tabController;
@@ -40,6 +44,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late Animation<double> _animation;
   int _unitySecondsLeft = 0;
   int _admobSecondsLeft = 0;
+  bool _isVpnDialogShowing = false;
   Timer? _unityTimer;
   Timer? _admobTimer;
   bool _canClaimDaily = false;
@@ -48,6 +53,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Timer? _arcadeTimer;
   int _arcadeCurrentPage = 0;
   int _uniqueTasksLength = 0;
+  
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  late ConfettiController _confettiController;
 
   bool get isAdmin =>
       FirebaseAuth.instance.currentUser?.uid == 'OeEwi4nMZrPjRLRiqWf1373btQT2';
@@ -119,6 +127,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // تفعيل مراقب حالة التطبيق
 
     _arcadePageController = PageController(initialPage: 0);
     _arcadeTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
@@ -137,6 +146,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _startBanListener();
     _loadUserData();
 
+    _confettiController = ConfettiController(duration: const Duration(seconds: 2));
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _checkDailyRewardStatus(user.uid);
@@ -185,7 +195,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _animation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
     _controller.forward();
 
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging && mounted) {
         HapticFeedback.selectionClick();
@@ -324,7 +334,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _showVpnBlocker() {
-    if (!mounted) return;
+    if (!mounted || _isVpnDialogShowing) return;
+    _isVpnDialogShowing = true;
 
     showDialog(
       context: context,
@@ -359,7 +370,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ],
         ),
       ),
-    );
+    ).then((_) {
+      _isVpnDialogShowing = false;
+    });
   }
 
   void _runTimer(String server, int remaining) {
@@ -565,7 +578,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         await batch.commit();
 
         if (mounted) {
+          _confettiController.play();
           _startCooldownWithFirebase(server, uid, cooldown);
+          _audioPlayer.play(AssetSource('sounds/success.mp3')).catchError((_) {});
           _showSuccessSnackBar(tr('you_won_points', args: [points.toString()]));
         }
       } catch (e) {
@@ -648,10 +663,43 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  void _initNotifications() {
+  Future<void> _initNotifications() async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    flutterLocalNotificationsPlugin.initialize(
+    await flutterLocalNotificationsPlugin.initialize(
         settings: const InitializationSettings(android: android));
+
+    // 1. إعدادات Firebase Messaging للإشعارات الفورية
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+    // 2. طلب الصلاحيات (مهم جداً لنظام أندرويد 13+ و iOS)
+    await messaging.requestPermission(alert: true, badge: true, sound: true);
+
+    // 3. الاشتراك في مجموعة (Topic) ليتمكن الأدمن من إرسال إشعار للجميع
+    await messaging.subscribeToTopic('all_users');
+
+    // 4. استقبال الإشعارات والتطبيق مفتوح (Foreground)
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      RemoteNotification? notification = message.notification;
+      AndroidNotification? android = message.notification?.android;
+
+      if (notification != null && android != null) {
+        flutterLocalNotificationsPlugin.show(
+          id: notification.hashCode,
+          title: notification.title,
+          body: notification.body,
+          notificationDetails: const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'push_notifications_channel',
+              'إشعارات العروض الجديدة',
+              importance: Importance.max,
+              priority: Priority.high,
+              color: Color(0xFF4527A0),
+              icon: '@mipmap/ic_launcher',
+            ),
+          ),
+        );
+      }
+    });
   }
 
   Future<void> _sendTimeNotification(String messageKey) async {
@@ -781,6 +829,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         final Map<String, dynamic> data =
             jsonDecode(response.body) as Map<String, dynamic>;
         final int reward = (data['rewardAmount'] ?? 10).toInt();
+          _confettiController.play();
+          _audioPlayer.play(AssetSource('sounds/success.mp3')).catchError((_) {});
         await _checkDailyRewardStatus(user.uid);
         _showDailyRewardSuccessDialog(reward);
         return;
@@ -1467,7 +1517,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ).createShader(bounds),
-          child: FaIcon(icon as FaIconData?, color: Colors.white, size: 50),
+          child: FaIcon(icon, color: Colors.white, size: 50),
         ),
         title: Text(title,
             style: const TextStyle(
@@ -1566,6 +1616,53 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             isPremium: !hasRated,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSocialMediaTab(Map<String, dynamic> userData) {
+    return GridView.count(
+      crossAxisCount: 2,
+      padding: const EdgeInsets.all(20),
+      mainAxisSpacing: 20,
+      crossAxisSpacing: 20,
+      children: [
+        _buildSocialIconCard(tr('youtube'), FontAwesomeIcons.youtube, Colors.red, () => _goToSocialMediaScreen(0)),
+        _buildSocialIconCard(tr('instagram'), FontAwesomeIcons.instagram, Colors.purpleAccent, () => _goToSocialMediaScreen(1)),
+        _buildSocialIconCard(tr('facebook'), FontAwesomeIcons.facebook, Colors.blue, () => _goToSocialMediaScreen(2)),
+        _buildSocialIconCard(tr('other_platforms'), Icons.more_horiz, Colors.orange, () => _goToSocialMediaScreen(3)),
+      ],
+    );
+  }
+
+  void _goToSocialMediaScreen(int index) {
+    AdManager.showSmartAd();
+    Navigator.push(context, MaterialPageRoute(builder: (_) => SocialMediaScreen(initialTabIndex: index)));
+  }
+
+  Widget _buildSocialIconCard(String title, dynamic icon, Color color, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E2E),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
+          boxShadow: [
+            BoxShadow(color: color.withValues(alpha: 0.2), blurRadius: 10, spreadRadius: 1),
+          ]
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            icon.fontPackage == 'font_awesome_flutter'
+                ? FaIcon(icon, size: 50, color: color)
+                : Icon(icon, size: 50, color: color),
+            const SizedBox(height: 15),
+            Text(title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
       ),
     );
   }
@@ -1713,6 +1810,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
       // 3. نتحقق من الشاشة الرئيسية الخلفية قبل إظهار رسالة النجاح للمستخدم
       if (!mounted) return;
+      _confettiController.play();
+      _audioPlayer.play(AssetSource('sounds/success.mp3')).catchError((_) {});
       _showSuccessSnackBar("${tr('success_rate')} 25 ${tr('points')}");
     } catch (e) {
       debugPrint("Error finalizing points: $e");
@@ -1879,7 +1978,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildTaskCard(
-      String title, String sub, int pts, IconData icon, VoidCallback action,
+      String title, String sub, int pts, dynamic icon, VoidCallback action,
       {bool isPremium = false}) {
     return Card(
       color: const Color(0xFF1E1E2E),
@@ -1903,7 +2002,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ).createShader(bounds),
-          child: Icon(icon, color: Colors.white, size: 46),
+          child: icon.fontPackage != 'font_awesome_flutter'
+              ? Icon(icon, color: Colors.white, size: 46)
+              : FaIcon(icon, color: Colors.white, size: 46),
         ),
         title: Text(title,
             style: const TextStyle(
@@ -2023,7 +2124,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 2.0),
           child: Text(
-            "الفرص القادمة", // Upcoming Opportunities
+            tr('upcoming_opportunities'),
             style: TextStyle(
               color: themeProvider.isDarkMode ? Colors.white : Colors.black87,
               fontWeight: FontWeight.bold,
@@ -2042,14 +2143,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 title: tr('daily_reward'),
                 isReady: _canClaimDaily,
                 readyText: tr('reward_available'),
-                waitingText: "مُطالب به اليوم", // "Claimed today"
+                waitingText: tr('claimed_today'),
                 onTap: _claimDailyReward,
               ),
               _buildUpcomingRewardItem(
                 icon: FontAwesomeIcons.gamepad,
                 title: tr('unity_payout'), // Server 1
                 isReady: _unitySecondsLeft <= 0,
-                readyText: "جاهز للمشاهدة", // "Ready to watch"
+                readyText: tr('ready_to_watch'),
                 waitingText: "${tr('wait')} ${_formatTime(_unitySecondsLeft)}",
                 onTap: () => _tabController.animateTo(0),
               ),
@@ -2057,7 +2158,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 icon: FontAwesomeIcons.google,
                 title: tr('admob_payout'), // Server 2
                 isReady: _admobSecondsLeft <= 0,
-                readyText: "جاهز للمشاهدة", // "Ready to watch"
+                readyText: tr('ready_to_watch'),
                 waitingText: "${tr('wait')} ${_formatTime(_admobSecondsLeft)}",
                 onTap: () => _tabController.animateTo(0),
               ),
@@ -2071,6 +2172,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _audioPlayer.dispose();
+    _confettiController.dispose();
+    WidgetsBinding.instance.removeObserver(this); // إزالة المراقب
     _banListener?.cancel();
     _unityTimer?.cancel();
     _admobTimer?.cancel();
@@ -2173,7 +2277,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               opacity: _animation,
               child: Scaffold(
                 drawer: _buildAppDrawer(context),
-                body: Container(
+                  body: Stack(
+                    children: [
+                      Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: themeProvider.isDarkMode
@@ -2201,6 +2307,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             Tab(
                                 icon: const Icon(Icons.grid_view_rounded),
                                 text: tr('offers')),
+                            Tab(
+                                icon: const Icon(Icons.connect_without_contact_rounded),
+                                text: tr('social_media')),
                           ],
                         ),
                         Expanded(
@@ -2218,13 +2327,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                     admobpoints),
                               ),
                               _buildOffersTab(hasRated),
+                              _buildSocialMediaTab(userData),
                             ],
                           ),
                         ),
                       ],
                     ),
                   ),
-                ),
+                      ),
+                      Align(
+                        alignment: Alignment.topCenter,
+                        child: ConfettiWidget(
+                          confettiController: _confettiController,
+                          blastDirectionality: BlastDirectionality.explosive,
+                          emissionFrequency: 0.05,
+                          numberOfParticles: 40,
+                          gravity: 0.2,
+                          colors: const [Colors.green, Colors.blue, Colors.pink, Colors.orange, Colors.purple],
+                        ),
+                      ),
+                    ],
+                  ),
               ),
             );
           },

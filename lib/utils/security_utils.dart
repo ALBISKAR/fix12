@@ -49,7 +49,7 @@ class SecurityUtils {
     required String adminUid,
   }) async {
 
-    final String myDeveloperDeviceId = "3a8edfc782d3c430cd4b89f2f2400f5b95df273a8907932d5dac3b700270dd15"; 
+    const String myDeveloperDeviceId = "3a8edfc782d3c430cd4b89f2f2400f5b95df273a8907932d5dac3b700270dd15"; 
     
     // فحص معرف الجهاز الحالي
     String currentDeviceId = await getDeviceId();

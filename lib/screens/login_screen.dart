@@ -1,6 +1,3 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -42,35 +39,6 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _referralController.dispose();
     super.dispose();
-  }
-
-  Future<void> sendNotificationToAdmin(String title, String body) async {
-    const String serverKey = 'AIzaSyDw2o4boLXWVKQ4WTW7fSfKkXsAJE5DR8I';
-    const String fcmUrl = 'https://fcm.googleapis.com/fcm/send';
-
-    final Map<String, dynamic> notificationData = {
-      'notification': {
-        'title': title,
-        'body': body,
-        'click_action': 'FLUTTER_NOTIFICATION_CLICK',
-        'sound': 'default',
-      },
-      'priority': 'high',
-      'to': '/topics/admin_notifications',
-    };
-
-    try {
-      await http.post(
-        Uri.parse(fcmUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'key=$serverKey',
-        },
-        body: jsonEncode(notificationData),
-      );
-    } catch (e) {
-      if (kDebugMode) print("Notification Error: $e");
-    }
   }
 
   void _showUpdateDialog({required bool isMandatory}) {

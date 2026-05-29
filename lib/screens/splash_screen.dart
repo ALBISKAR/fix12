@@ -45,6 +45,12 @@ class _SplashScreenState extends State<SplashScreen> {
     // 2. تحميل الإعلانات والعمليات في الخلفية (بدون انتظار - Async)
     _runBackgroundTasks(currentUser);
 
+    // إذا كان المستخدم هو الأدمن، تجاوز وقت الانتظار وانتقل فوراً
+    if (currentUser != null && currentUser.uid == _adminUid) {
+      _proceedToNextScreen(currentUser);
+      return;
+    }
+
     // 3. بدء المؤقت للتحميل البصري (10 ثوانٍ)
     _startLoadingTimer(currentUser);
   }

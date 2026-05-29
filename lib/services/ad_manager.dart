@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -22,8 +23,7 @@ class AdManager {
   static bool _isAppOpenAdLoading = false;
   static bool _isShowingAppOpenAd = false;
   static bool _isRewardedAdLoading = false;
-  static int _clickCounter = 0;
-  static const int _adThreshold = 5;
+  static Timer? _interstitialTimer;
 
   // Start.io
   static final StartAppSdk _startAppSdk = StartAppSdk();
@@ -51,6 +51,19 @@ class AdManager {
     _startAppSdk.setTestAdsEnabled(false); 
     loadServer1Ad();
     loadStartAppInterstitial();
+    
+    _startInterstitialTimer(); // بدء مؤقت عرض الإعلانات البينية تلقائياً
+  }
+
+  static void _startInterstitialTimer() {
+    _interstitialTimer?.cancel();
+    _interstitialTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
+      _tryShowSmartAd();
+    });
+  }
+
+  static void stopInterstitialTimer() {
+    _interstitialTimer?.cancel();
   }
 
   // ==================== سيرفر 1 (Start.io) ====================
@@ -230,54 +243,72 @@ class AdManager {
   // ==================== إعلانات بينية ذكية ====================
 
   static void showSmartAd() {
-    if (isAdmin || _isShowingAd) return;
-    _clickCounter++;
-    if (_clickCounter >= _adThreshold) {
-      if (_interstitialAd != null || _startAppInterstitialAd != null) {
-        _clickCounter = 0;
-        if (_interstitialAd != null) {
-          _isShowingAd = true;
-          _interstitialAd!.fullScreenContentCallback =
-              FullScreenContentCallback(
-            onAdShowedFullScreenContent: (ad) {
-              _isShowingAd = true;
-            },
-            onAdDismissedFullScreenContent: (ad) {
-              _isShowingAd = false;
-              _lastAdCloseTime = DateTime.now();
-              ad.dispose();
-              loadAdMobInterstitial();
-            },
-            onAdFailedToShowFullScreenContent: (ad, err) {
-              _isShowingAd = false;
-              ad.dispose();
-              loadAdMobInterstitial();
-            },
-          );
-          try {
-            _interstitialAd!.show();
-          } catch (e) {
-            _isShowingAd = false;
-            loadAdMobInterstitial();
-          }
-          _interstitialAd = null;
-        } else if (_startAppInterstitialAd != null) {
-          _isShowingAd = true;
-          _startAppInterstitialAd!.show().then((_) {
+    // تم إيقاف عرض الإعلانات بناءً على النقرات
+    // يتم الآن العرض تلقائياً كل 3 دقائق عبر الدالة _tryShowSmartAd
+  }
+
+  static void _tryShowSmartAd() {
+    if (isAdmin) return;
+
+    // التأكد من أن التطبيق في الواجهة الأمامية وليس في الخلفية
+    if (WidgetsBinding.instance.lifecycleState != null && 
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      Timer(const Duration(minutes: 1), _tryShowSmartAd);
+      return;
+    }
+
+    // إذا كان هناك إعلان آخر يعمل حالياً، ننتظر دقيقة ثم نعاود المحاولة
+    if (_isShowingAd) {
+      Timer(const Duration(minutes: 1), _tryShowSmartAd);
+      return;
+    }
+
+    // إذا مر أقل من 5 ثواني على آخر إعلان أغلقه المستخدم لتجنب الإزعاج المزدوج
+    if (DateTime.now().difference(_lastAdCloseTime).inSeconds < 5) return;
+
+    if (_interstitialAd != null || _startAppInterstitialAd != null) {
+      if (_interstitialAd != null) {
+        _isShowingAd = true;
+        _interstitialAd!.fullScreenContentCallback =
+            FullScreenContentCallback(
+          onAdShowedFullScreenContent: (ad) {
+            _isShowingAd = true;
+          },
+          onAdDismissedFullScreenContent: (ad) {
             _isShowingAd = false;
             _lastAdCloseTime = DateTime.now();
-            _startAppInterstitialAd = null;
-            loadStartAppInterstitial();
-          }).catchError((_) {
+            ad.dispose();
+            loadAdMobInterstitial();
+          },
+          onAdFailedToShowFullScreenContent: (ad, err) {
             _isShowingAd = false;
-            _startAppInterstitialAd = null;
-            loadStartAppInterstitial();
-          });
+            ad.dispose();
+            loadAdMobInterstitial();
+          },
+        );
+        try {
+          _interstitialAd!.show();
+        } catch (e) {
+          _isShowingAd = false;
+          loadAdMobInterstitial();
         }
-      } else {
-        loadAdMobInterstitial();
-        loadStartAppInterstitial();
+        _interstitialAd = null;
+      } else if (_startAppInterstitialAd != null) {
+        _isShowingAd = true;
+        _startAppInterstitialAd!.show().then((_) {
+          _isShowingAd = false;
+          _lastAdCloseTime = DateTime.now();
+          _startAppInterstitialAd = null;
+          loadStartAppInterstitial();
+        }).catchError((_) {
+          _isShowingAd = false;
+          _startAppInterstitialAd = null;
+          loadStartAppInterstitial();
+        });
       }
+    } else {
+      loadAdMobInterstitial();
+      loadStartAppInterstitial();
     }
   }
 
